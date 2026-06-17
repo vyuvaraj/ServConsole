@@ -148,6 +148,11 @@ func main() {
 		log.Printf("[discovery] OTLP      → %s", activeDiscovery.OTLPEndpoint)
 	}
 
+	// Initialize OIDC and Auth Secret
+	initJWTSecret()
+	initOIDC()
+	loadAuditLogs()
+
 	// Parse downstream URLs
 	gURL, err := url.Parse(*gateUrl)
 	if err != nil {
@@ -180,13 +185,20 @@ func main() {
 	mux.HandleFunc("/api/cluster", authorizeConsole(handleCluster))
 	mux.HandleFunc("/api/cluster/rebalance", authorizeConsole(handleRebalance))
 	mux.HandleFunc("/api/discovery", handleDiscovery)
+	mux.HandleFunc("/api/audit-logs", authorizeConsole(handleGetAuditLogs))
 
-	// 2. Proxies
+	// 2. Auth E&OIDC
+	mux.HandleFunc("/api/auth/config", handleAuthConfig)
+	mux.HandleFunc("/api/auth/login", handleLogin)
+	mux.HandleFunc("/api/auth/callback", handleCallback)
+	mux.HandleFunc("/api/auth/logout", handleLogout)
+
+	// 3. Proxies
 	mux.Handle("/api/proxy/gate/", authorizeConsole(gateProxy.ServeHTTP))
 	mux.Handle("/api/proxy/store/", authorizeConsole(storeProxy.ServeHTTP))
 	mux.Handle("/api/proxy/queue/", authorizeConsole(queueProxy.ServeHTTP))
 
-	// 3. Static File Server
+	// 4. Static File Server
 	fileServer := http.FileServer(http.Dir("./web"))
 	mux.Handle("/", fileServer)
 
@@ -219,6 +231,16 @@ func configureProxyDirector(proxy *httputil.ReverseProxy, target *url.URL, prefi
 		if defaultToken != "" && req.Header.Get("Authorization") == "" {
 			req.Header.Set("Authorization", "Bearer "+defaultToken)
 		}
+	}
+
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		req := resp.Request
+		if req != nil && (req.Method == "POST" || req.Method == "PUT" || req.Method == "DELETE") {
+			user := req.Header.Get("X-Console-User")
+			action := getProxyActionName(prefix, req.URL.Path)
+			addAuditLog(user, action, req.Method, req.URL.Path, resp.StatusCode)
+		}
+		return nil
 	}
 }
 
@@ -336,6 +358,8 @@ func handleRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		user := r.Header.Get("X-Console-User")
+		addAuditLog(user, "Register/Update API Route: "+newRoute.Prefix, r.Method, r.URL.Path, http.StatusOK)
 		log.Printf("Successfully updated config with route prefix: %s", newRoute.Prefix)
 	}
 
@@ -463,6 +487,8 @@ func handleRebalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	user := r.Header.Get("X-Console-User")
+	addAuditLog(user, "Trigger Cluster Rebalance", r.Method, r.URL.Path, resp.StatusCode)
 	log.Printf("Rebalance gossip round triggered, ServStore responded: %d", resp.StatusCode)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "rebalance_triggered"})
@@ -508,7 +534,7 @@ func discoverySource() string {
 func authorizeConsole(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jwtSec := os.Getenv("SERV_JWT_SECRET")
-		if jwtSec == "" {
+		if jwtSec == "" && oidcIssuer == "" {
 			next(w, r)
 			return
 		}
@@ -526,11 +552,13 @@ func authorizeConsole(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if _, ok := validateJWT(token, []byte(jwtSec)); !ok {
+		username, ok := validateJWT(token, jwtSecBytes)
+		if !ok {
 			http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
 			return
 		}
 
+		r.Header.Set("X-Console-User", username)
 		next(w, r)
 	}
 }
@@ -583,4 +611,308 @@ func base64UrlDecode(s string) ([]byte, error) {
 	s = strings.ReplaceAll(s, "-", "+")
 	s = strings.ReplaceAll(s, "_", "/")
 	return base64.URLEncoding.DecodeString(s)
+}
+
+// --- OIDC SSO and Audit Logs Implementation ---
+
+var (
+	oidcIssuer       = os.Getenv("SERV_OIDC_ISSUER")
+	oidcClientID     = os.Getenv("SERV_OIDC_CLIENT_ID")
+	oidcClientSecret = os.Getenv("SERV_OIDC_CLIENT_SECRET")
+	oidcRedirectURL  = os.Getenv("SERV_OIDC_REDIRECT_URL")
+
+	oidcAuthURL  string
+	oidcTokenURL string
+	jwtSecBytes  []byte
+)
+
+func initJWTSecret() {
+	// Execute service discovery load so variables are populated
+	activeDiscovery = loadDiscovery()
+	sec := activeDiscovery.JWTSecret
+	if sec == "" {
+		sec = fmt.Sprintf("ephemeral-%d-%d", time.Now().UnixNano(), sha256.Sum256([]byte("servconsole-salt")))
+		log.Println("[auth] SERV_JWT_SECRET not set. Generated ephemeral session key.")
+	}
+	jwtSecBytes = []byte(sec)
+}
+
+func initOIDC() {
+	if oidcIssuer == "" {
+		return
+	}
+	log.Printf("[OIDC] Issuer configured: %s", oidcIssuer)
+	wellKnown := strings.TrimSuffix(oidcIssuer, "/") + "/.well-known/openid-configuration"
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(wellKnown)
+	if err == nil {
+		defer resp.Body.Close()
+		var config struct {
+			AuthorizationEndpoint string `json:"authorization_endpoint"`
+			TokenEndpoint         string `json:"token_endpoint"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&config); err == nil {
+			oidcAuthURL = config.AuthorizationEndpoint
+			oidcTokenURL = config.TokenEndpoint
+			log.Printf("[OIDC] Discovered endpoints: auth=%s, token=%s", oidcAuthURL, oidcTokenURL)
+			return
+		}
+	}
+	
+	oidcAuthURL = strings.TrimSuffix(oidcIssuer, "/") + "/protocol/openid-connect/auth"
+	oidcTokenURL = strings.TrimSuffix(oidcIssuer, "/") + "/protocol/openid-connect/token"
+	log.Printf("[OIDC] Discovery failed or skipped. Using default endpoints: auth=%s, token=%s", oidcAuthURL, oidcTokenURL)
+}
+
+func generateLocalJWT(username string) (string, error) {
+	header := base64UrlEncode([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	payload := base64UrlEncode([]byte(fmt.Sprintf(`{"username":%q,"exp":%d}`, username, time.Now().Add(24*time.Hour).Unix())))
+	
+	mac := hmac.New(sha256.New, jwtSecBytes)
+	mac.Write([]byte(header + "." + payload))
+	signature := base64UrlEncode(mac.Sum(nil))
+	
+	return header + "." + payload + "." + signature, nil
+}
+
+func base64UrlEncode(b []byte) string {
+	s := base64.URLEncoding.EncodeToString(b)
+	return strings.TrimRight(s, "=")
+}
+
+func handleAuthConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"sso_enabled": oidcIssuer != "",
+		"issuer":      oidcIssuer,
+		"client_id":   oidcClientID,
+	})
+}
+
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	if oidcIssuer == "" {
+		http.Error(w, "OIDC SSO is not configured", http.StatusBadRequest)
+		return
+	}
+	
+	u, err := url.Parse(oidcAuthURL)
+	if err != nil {
+		http.Error(w, "Invalid auth URL", http.StatusInternalServerError)
+		return
+	}
+	q := u.Query()
+	q.Set("response_type", "code")
+	q.Set("client_id", oidcClientID)
+	q.Set("redirect_uri", oidcRedirectURL)
+	q.Set("scope", "openid profile email")
+	q.Set("state", "random-state-string")
+	u.RawQuery = q.Encode()
+	
+	http.Redirect(w, r, u.String(), http.StatusTemporaryRedirect)
+}
+
+func handleCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "Missing code query param", http.StatusBadRequest)
+		return
+	}
+	
+	data := url.Values{}
+	data.Set("grant_type", "authorization_code")
+	data.Set("code", code)
+	data.Set("redirect_uri", oidcRedirectURL)
+	data.Set("client_id", oidcClientID)
+	data.Set("client_secret", oidcClientSecret)
+	
+	req, err := http.NewRequest("POST", oidcTokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		http.Error(w, "Failed to create token exchange request: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	
+	client := http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "Token exchange failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		http.Error(w, fmt.Sprintf("Token exchange returned status %d: %s", resp.StatusCode, string(body)), http.StatusInternalServerError)
+		return
+	}
+	
+	var res struct {
+		IDToken string `json:"id_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		http.Error(w, "Failed to decode token response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	if res.IDToken == "" {
+		http.Error(w, "No id_token returned", http.StatusInternalServerError)
+		return
+	}
+	
+	parts := strings.Split(res.IDToken, ".")
+	if len(parts) != 3 {
+		http.Error(w, "Invalid ID token format", http.StatusInternalServerError)
+		return
+	}
+	payloadBytes, err := base64UrlDecode(parts[1])
+	if err != nil {
+		http.Error(w, "Failed to decode ID token payload: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	var claims struct {
+		PreferredUsername string `json:"preferred_username"`
+		Email             string `json:"email"`
+		Sub               string `json:"sub"`
+	}
+	_ = json.Unmarshal(payloadBytes, &claims)
+	
+	username := claims.PreferredUsername
+	if username == "" {
+		username = claims.Email
+	}
+	if username == "" {
+		username = claims.Sub
+	}
+	if username == "" {
+		username = "sso-user"
+	}
+	
+	localToken, err := generateLocalJWT(username)
+	if err != nil {
+		http.Error(w, "Failed to generate session token: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	http.SetCookie(w, &http.Cookie{
+		Name:     "token",
+		Value:    localToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,
+		Expires:  time.Now().Add(24 * time.Hour),
+	})
+	
+	addAuditLog(username, "SSO Login Success", "GET", "/api/auth/callback", http.StatusOK)
+	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	user := r.Header.Get("X-Console-User")
+	addAuditLog(user, "User Logged Out", "POST", "/api/auth/logout", http.StatusOK)
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+	
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"logged_out"}`))
+}
+
+// --- Audit Logging System ---
+
+type AuditEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	User      string    `json:"user"`
+	Action    string    `json:"action"`
+	Method    string    `json:"method"`
+	Path      string    `json:"path"`
+	Status    int       `json:"status"`
+}
+
+var (
+	auditLogs   []AuditEntry
+	auditLogsMu sync.Mutex
+	auditFile   = "audit.json"
+)
+
+func loadAuditLogs() {
+	auditLogsMu.Lock()
+	defer auditLogsMu.Unlock()
+	
+	data, err := os.ReadFile(auditFile)
+	if err == nil {
+		_ = json.Unmarshal(data, &auditLogs)
+	}
+	if auditLogs == nil {
+		auditLogs = []AuditEntry{}
+	}
+}
+
+func saveAuditLogs() {
+	data, err := json.MarshalIndent(auditLogs, "", "  ")
+	if err == nil {
+		_ = os.WriteFile(auditFile, data, 0644)
+	}
+}
+
+func addAuditLog(user string, action string, method string, path string, status int) {
+	auditLogsMu.Lock()
+	defer auditLogsMu.Unlock()
+	
+	if user == "" {
+		user = "anonymous"
+	}
+	
+	entry := AuditEntry{
+		Timestamp: time.Now(),
+		User:      user,
+		Action:    action,
+		Method:    method,
+		Path:      path,
+		Status:    status,
+	}
+	
+	auditLogs = append([]AuditEntry{entry}, auditLogs...)
+	if len(auditLogs) > 200 {
+		auditLogs = auditLogs[:200]
+	}
+	
+	saveAuditLogs()
+}
+
+func handleGetAuditLogs(w http.ResponseWriter, r *http.Request) {
+	auditLogsMu.Lock()
+	defer auditLogsMu.Unlock()
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(auditLogs)
+}
+
+func getProxyActionName(prefix string, path string) string {
+	switch prefix {
+	case "/api/proxy/gate":
+		if strings.Contains(path, "/api/admin/middleware") {
+			return "Update Gateway WASM Middleware"
+		}
+		return "Gateway API Proxy Request"
+	case "/api/proxy/store":
+		return "Storage S3 Proxy Request"
+	case "/api/proxy/queue":
+		if strings.Contains(path, "/transform") {
+			return "Register Queue WASM Transform"
+		} else if strings.Contains(path, "/dlq") {
+			return "Configure Queue DLQ"
+		} else if strings.Contains(path, "/publish") {
+			return "Publish STOMP Message via API"
+		}
+		return "Queue Broker Proxy Request"
+	default:
+		return "Proxy Request"
+	}
 }

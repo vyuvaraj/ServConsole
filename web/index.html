@@ -41,11 +41,19 @@
           <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.26-.81-1-1.4-1.9-1.4h-1v-3c0-.55-.45-1-1-1h-6v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
           Telemetry & Traces
         </button>
+        <button class="tab-btn" data-tab="audit">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+          Audit Logs
+        </button>
       </nav>
 
       <div class="system-status">
         <div class="status-indicator online" id="global-status-dot"></div>
         <span id="global-status-text">Ecosystem Online</span>
+        <div id="user-profile-section" style="display: none; margin-left: 1rem; align-items: center; gap: 0.5rem; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 1rem;">
+          <span id="logged-in-username" style="font-size: 0.85rem; color: #94a3b8; font-weight: 500;"></span>
+          <button id="btn-logout" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Logout</button>
+        </div>
       </div>
     </header>
 
@@ -340,6 +348,36 @@
           </div>
         </div>
       </div>
+
+      <!-- TAB: AUDIT LOGS -->
+      <div class="tab-pane" id="tab-audit">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Ecosystem Security Audit Logs</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-audit">Refresh Audit Logs</button>
+            </div>
+            <p class="section-desc">Immutable timeline of administrative operations, security policy updates, and WASM hot-swaps.</p>
+            <div class="table-container">
+              <table id="audit-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Method</th>
+                    <th>Path</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically by app.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 
@@ -379,6 +417,21 @@
         </div>
         <button type="submit" class="btn btn-primary w-100 mt-3">Register Route</button>
       </form>
+    </div>
+  </div>
+  <!-- Login Screen Overlay -->
+  <div id="login-screen" class="login-overlay" style="display: none;">
+    <div class="login-card glass-card">
+      <div class="logo-area" style="margin-bottom: 2rem; justify-content: center;">
+        <div class="logo-icon">▲</div>
+        <div class="logo-text">
+          <h1>ServConsole</h1>
+          <span>Unified Servverse Engine</span>
+        </div>
+      </div>
+      <h2>SSO Authentication Required</h2>
+      <p class="section-desc" style="text-align: center; margin-bottom: 2rem;">Please authenticate via your configured OpenID Connect (OIDC) identity provider to access the administration dashboard.</p>
+      <button id="btn-sso-login" class="btn btn-primary w-100" style="padding: 1rem; font-weight: 600;">🔑 Login with SSO</button>
     </div>
   </div>
 </body>

@@ -25,10 +25,12 @@ const NODE_COLORS = [
 ];
 
 document.addEventListener('DOMContentLoaded', () => {
+  checkAuthConfig();
   initTabs();
   initForms();
   initPolling();
   initRingCanvas();
+  initAuditLogsUI();
 });
 
 // --- Tab Switching ---
@@ -54,6 +56,8 @@ function initTabs() {
         fetchClusterHealth();
       } else if (tabId === 'traces') {
         fetchTraces();
+      } else if (tabId === 'audit') {
+        fetchAuditLogs();
       }
     });
   });
@@ -64,6 +68,10 @@ function initPolling() {
   const poll = async () => {
     try {
       const res = await fetch('/api/status');
+      if (res.status === 401) {
+        showLoginScreen();
+        return;
+      }
       const data = await res.json();
       
       // Update local state
@@ -756,3 +764,132 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// --- OIDC SSO and Audit Logs Frontend Hooks ---
+
+let SSO_ENABLED = false;
+
+async function checkAuthConfig() {
+  try {
+    const res = await fetch('/api/auth/config');
+    const config = await res.json();
+    SSO_ENABLED = config.sso_enabled;
+    
+    if (SSO_ENABLED) {
+      // Check current user name from cookies (stored in client profile status / info endpoint)
+      // For local simplicity, we query a simple check endpoint or extract from headers
+      const statusRes = await fetch('/api/status');
+      if (statusRes.status === 401) {
+        showLoginScreen();
+      } else {
+        const username = getCookieUsername();
+        displayUserProfile(username || "SSO User");
+      }
+    }
+  } catch (err) {
+    console.error("Auth config check failed:", err);
+  }
+}
+
+function showLoginScreen() {
+  document.getElementById('login-screen').style.display = 'flex';
+  // Disable main app UI container pointer events
+  const container = document.querySelector('.app-container');
+  if (container) {
+    container.style.opacity = '0.15';
+    container.style.pointerEvents = 'none';
+  }
+}
+
+function displayUserProfile(username) {
+  const profileSection = document.getElementById('user-profile-section');
+  const userText = document.getElementById('logged-in-username');
+  if (profileSection && userText) {
+    userText.textContent = username;
+    profileSection.style.display = 'flex';
+  }
+}
+
+function getCookieUsername() {
+  const cookie = document.cookie.split('; ').find(row => row.startsWith('token='));
+  if (!cookie) return null;
+  const token = cookie.split('=')[1];
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.username;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchAuditLogs() {
+  try {
+    const res = await fetch('/api/audit-logs');
+    if (res.status === 401) {
+      showLoginScreen();
+      return;
+    }
+    const logs = await res.json();
+    
+    const tbody = document.querySelector('#audit-table tbody');
+    tbody.innerHTML = '';
+    
+    if (logs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No security audit logs recorded yet.</td></tr>`;
+      return;
+    }
+    
+    logs.forEach(log => {
+      const tr = document.createElement('tr');
+      const timeStr = new Date(log.timestamp).toLocaleTimeString();
+      const dateStr = new Date(log.timestamp).toLocaleDateString();
+      const statusClass = log.status >= 200 && log.status < 300 ? 'success' : (log.status >= 400 ? 'error' : 'warning');
+      const methodClass = log.method.toLowerCase();
+      
+      tr.innerHTML = `
+        <td><span style="color:var(--text-muted);">${dateStr} ${timeStr}</span></td>
+        <td><strong style="color:var(--primary);">${escapeHtml(log.user)}</strong></td>
+        <td><strong>${escapeHtml(log.action)}</strong></td>
+        <td><span class="method-badge ${methodClass}">${escapeHtml(log.method)}</span></td>
+        <td><span style="font-family:var(--font-mono); font-size:0.8rem;">${escapeHtml(log.path)}</span></td>
+        <td><span class="status-badge ${statusClass}">${log.status}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error("Failed to fetch audit logs:", err);
+  }
+}
+
+function initAuditLogsUI() {
+  const refreshAuditBtn = document.getElementById('btn-refresh-audit');
+  if (refreshAuditBtn) {
+    refreshAuditBtn.addEventListener('click', fetchAuditLogs);
+  }
+  
+  const ssoLoginBtn = document.getElementById('btn-sso-login');
+  if (ssoLoginBtn) {
+    ssoLoginBtn.addEventListener('click', () => {
+      window.location.href = '/api/auth/login';
+    });
+  }
+  
+  const logoutBtn = document.getElementById('btn-logout');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/auth/logout', { method: 'POST' });
+        if (res.ok) {
+          window.location.reload();
+        }
+      } catch (err) {
+        console.error("Logout failed:", err);
+      }
+    });
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
