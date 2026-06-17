@@ -86,3 +86,80 @@ You can configure downstream URLs and credentials when starting the console:
 `ServConsole` integrates with the standard OpenTelemetry schema. When downstream services emit spans, they are captured and can be visualized under the **Telemetry** dashboard pane.
 * Traces are collected via the `/console/traces` endpoint exposed by the ServStore backend telemetry cache.
 * Traces adhere to the W3C Trace Context standard (`traceparent` header).
+
+---
+
+## Service Discovery
+
+ServConsole supports **zero-config wiring** via the `SERVVERSE_DISCOVERY` environment variable, replacing the need to pass multiple CLI flags for every service URL.
+
+### Option A — Inline JSON
+```bash
+export SERVVERSE_DISCOVERY='{
+  "gate":  "http://servgate:8080",
+  "store": "http://servstore:8081",
+  "queue": "http://servqueue:8082",
+  "otlp_endpoint": "http://otelcollector:4318"
+}'
+./servconsole.exe
+```
+
+### Option B — Discovery File
+```bash
+# Copy and edit the example
+cp services.example.json services.json
+
+export SERVVERSE_DISCOVERY=./services.json
+./servconsole.exe
+```
+
+### Option C — CLI Flags (default, unchanged)
+```bash
+./servconsole.exe \
+  --gate-url=http://localhost:8080 \
+  --store-url=http://localhost:8081 \
+  --queue-url=http://localhost:8082
+```
+
+### Docker Compose Example
+```yaml
+services:
+  servconsole:
+    image: servconsole:latest
+    ports:
+      - "8083:8083"
+    environment:
+      SERVVERSE_DISCOVERY: |
+        {
+          "gate":          "http://servgate:8080",
+          "store":         "http://servstore:8081",
+          "queue":         "http://servqueue:8082",
+          "auth_token":    "gateway-secret-token",
+          "jwt_secret":    "shared-signing-secret",
+          "otlp_endpoint": "http://otelcollector:4318"
+        }
+```
+
+### Discovery Introspection API
+The active discovery configuration (with secrets redacted) is always available at:
+```
+GET /api/discovery
+```
+```json
+{
+  "gate":          "http://servgate:8080",
+  "store":         "http://servstore:8081",
+  "queue":         "http://servqueue:8082",
+  "console_port":  8083,
+  "otlp_endpoint": "http://otelcollector:4318",
+  "auth_token":    "ga**************************en",
+  "source":        "SERVVERSE_DISCOVERY"
+}
+```
+
+### Additional Env Vars
+| Variable | Purpose |
+|---|---|
+| `SERVVERSE_DISCOVERY` | JSON string or file path — wires all service URLs at once |
+| `SERV_JWT_SECRET` | Shared JWT signing secret across all Servverse services |
+| `SERV_OTLP_ENDPOINT` | OpenTelemetry collector endpoint for unified trace correlation |

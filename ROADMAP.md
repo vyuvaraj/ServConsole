@@ -34,7 +34,7 @@ This document outlines the design phases, completed modules, and upcoming featur
 * [ ] **Audit Logs Dashboard**: Track administrative operations (e.g. WASM hot-swaps, route creations) in a secure immutable log table.
 
 ### Phase 5: Ecosystem Integration Depth (Q2 2027)
-* [ ] **Service Discovery Config**: Replace hardcoded localhost ports with a `services.json` or `SERVVERSE_DISCOVERY` env-var discovery map — prerequisite for Docker Compose and Kubernetes deployments.
+* [x] **Service Discovery Config**: Replace hardcoded localhost ports with a `services.json` or `SERVVERSE_DISCOVERY` env-var discovery map — prerequisite for Docker Compose and Kubernetes deployments.
 * [ ] **Shared OTel Collector Config**: Surface a single `SERV_OTLP_ENDPOINT` setting propagated to all connected services; enables unified cross-service trace correlation in one UI.
 * [ ] **ServQueue Topic Admin**: Full WAL inspection, delayed message queue view, and WASM transform debug panels in the dashboard.
 * [ ] **ServGate Multi-Replica Config Sync**: Write route configurations to a ServStore-backed distributed bucket (`serv-config`) instead of local JSON file.

@@ -25,6 +25,74 @@ var (
 	gateConfig = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
 )
 
+// ServDiscovery is the structure of the SERVVERSE_DISCOVERY JSON manifest.
+// Set the env var SERVVERSE_DISCOVERY to a JSON string or a file path to
+// override any of these values without recompiling or changing CLI flags.
+type ServDiscovery struct {
+	Gate         string `json:"gate"`          // ServGate base URL
+	Store        string `json:"store"`         // ServStore base URL
+	Queue        string `json:"queue"`         // ServQueue base URL
+	ConsolePort  int    `json:"console_port"` // Override listen port
+	JWTSecret    string `json:"jwt_secret"`   // Shared JWT signing secret
+	OTLPEndpoint string `json:"otlp_endpoint"` // Shared OpenTelemetry collector
+	GateConfig   string `json:"gate_config"`  // Path to ServGate config.json
+	AuthToken    string `json:"auth_token"`   // Downstream proxy auth token
+}
+
+// activeDiscovery holds the resolved service discovery config after startup.
+var activeDiscovery ServDiscovery
+
+// loadDiscovery resolves service endpoints from the SERVVERSE_DISCOVERY env var
+// (JSON string or file path), falling back to CLI flag values.
+func loadDiscovery() ServDiscovery {
+	d := ServDiscovery{
+		Gate:         *gateUrl,
+		Store:        *storeUrl,
+		Queue:        *queueUrl,
+		ConsolePort:  *port,
+		AuthToken:    *authToken,
+		GateConfig:   *gateConfig,
+		OTLPEndpoint: os.Getenv("SERV_OTLP_ENDPOINT"),
+		JWTSecret:    os.Getenv("SERV_JWT_SECRET"),
+	}
+
+	raw := os.Getenv("SERVVERSE_DISCOVERY")
+	if raw == "" {
+		log.Println("[discovery] SERVVERSE_DISCOVERY not set — using CLI flags / defaults")
+		return d
+	}
+
+	// Try as JSON string first, then as a file path
+	var manifest ServDiscovery
+	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
+		// Treat as a file path
+		data, ferr := os.ReadFile(raw)
+		if ferr != nil {
+			log.Printf("[discovery] SERVVERSE_DISCOVERY is neither valid JSON nor a readable file: %v", ferr)
+			return d
+		}
+		if err2 := json.Unmarshal(data, &manifest); err2 != nil {
+			log.Printf("[discovery] Failed to parse discovery file %s: %v", raw, err2)
+			return d
+		}
+		log.Printf("[discovery] Loaded from file: %s", raw)
+	} else {
+		log.Println("[discovery] Loaded from SERVVERSE_DISCOVERY env var (inline JSON)")
+	}
+
+	// Merge: only override fields that are non-empty in the manifest
+	if manifest.Gate != "" { d.Gate = manifest.Gate }
+	if manifest.Store != "" { d.Store = manifest.Store }
+	if manifest.Queue != "" { d.Queue = manifest.Queue }
+	if manifest.ConsolePort != 0 { d.ConsolePort = manifest.ConsolePort }
+	if manifest.AuthToken != "" { d.AuthToken = manifest.AuthToken }
+	if manifest.JWTSecret != "" { d.JWTSecret = manifest.JWTSecret }
+	if manifest.OTLPEndpoint != "" { d.OTLPEndpoint = manifest.OTLPEndpoint }
+	if manifest.GateConfig != "" { d.GateConfig = manifest.GateConfig }
+
+	return d
+}
+
 type Route struct {
 	Prefix             string   `json:"prefix"`
 	Target             string   `json:"target"`
@@ -60,6 +128,24 @@ var configMu sync.Mutex
 func main() {
 	flag.Parse()
 
+	// Load service discovery (SERVVERSE_DISCOVERY env var > CLI flags > defaults)
+	activeDiscovery = loadDiscovery()
+
+	// Apply resolved URLs back to the flag vars so all handlers pick them up
+	*gateUrl    = activeDiscovery.Gate
+	*storeUrl   = activeDiscovery.Store
+	*queueUrl   = activeDiscovery.Queue
+	*port       = activeDiscovery.ConsolePort
+	*authToken  = activeDiscovery.AuthToken
+	*gateConfig = activeDiscovery.GateConfig
+
+	log.Printf("[discovery] ServGate  → %s", *gateUrl)
+	log.Printf("[discovery] ServStore → %s", *storeUrl)
+	log.Printf("[discovery] ServQueue → %s", *queueUrl)
+	if activeDiscovery.OTLPEndpoint != "" {
+		log.Printf("[discovery] OTLP      → %s", activeDiscovery.OTLPEndpoint)
+	}
+
 	// Parse downstream URLs
 	gURL, err := url.Parse(*gateUrl)
 	if err != nil {
@@ -91,6 +177,7 @@ func main() {
 	mux.HandleFunc("/api/routes", handleRoutes)
 	mux.HandleFunc("/api/cluster", handleCluster)
 	mux.HandleFunc("/api/cluster/rebalance", handleRebalance)
+	mux.HandleFunc("/api/discovery", handleDiscovery)
 
 	// 2. Proxies
 	mux.Handle("/api/proxy/gate/", gateProxy)
@@ -385,3 +472,39 @@ func handleRebalance(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "rebalance_triggered"})
 }
 
+// handleDiscovery returns the currently active service discovery configuration.
+// Sensitive fields (jwt_secret, auth_token) are redacted before sending to the browser.
+func handleDiscovery(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Safe view — redact secrets
+	safe := map[string]interface{}{
+		"gate":          activeDiscovery.Gate,
+		"store":         activeDiscovery.Store,
+		"queue":         activeDiscovery.Queue,
+		"console_port":  activeDiscovery.ConsolePort,
+		"otlp_endpoint": activeDiscovery.OTLPEndpoint,
+		"gate_config":   activeDiscovery.GateConfig,
+		"jwt_secret":    redact(activeDiscovery.JWTSecret),
+		"auth_token":    redact(activeDiscovery.AuthToken),
+		"source":        discoverySource(),
+	}
+	json.NewEncoder(w).Encode(safe)
+}
+
+func redact(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) <= 4 {
+		return "****"
+	}
+	return s[:2] + strings.Repeat("*", len(s)-4) + s[len(s)-2:]
+}
+
+func discoverySource() string {
+	if os.Getenv("SERVVERSE_DISCOVERY") != "" {
+		return "SERVVERSE_DISCOVERY"
+	}
+	return "cli-flags/defaults"
+}

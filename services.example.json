@@ -1,0 +1,14 @@
+{
+  "_comment": "Servverse service discovery manifest. Copy to services.json and set SERVVERSE_DISCOVERY=./services.json (or pass as inline JSON).",
+
+  "gate":          "http://localhost:8080",
+  "store":         "http://localhost:8081",
+  "queue":         "http://localhost:8082",
+  "console_port":  8083,
+
+  "auth_token":    "gateway-secret-token",
+  "jwt_secret":    "change-me-in-production",
+  "otlp_endpoint": "http://localhost:4318",
+
+  "gate_config":   "../ServGate/config.json"
+}
