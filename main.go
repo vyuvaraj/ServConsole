@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -173,16 +176,16 @@ func main() {
 	mux := http.NewServeMux()
 
 	// 1. ServConsole Status Aggregator & Routes API
-	mux.HandleFunc("/api/status", handleStatus)
-	mux.HandleFunc("/api/routes", handleRoutes)
-	mux.HandleFunc("/api/cluster", handleCluster)
-	mux.HandleFunc("/api/cluster/rebalance", handleRebalance)
+	mux.HandleFunc("/api/status", authorizeConsole(handleStatus))
+	mux.HandleFunc("/api/routes", authorizeConsole(handleRoutes))
+	mux.HandleFunc("/api/cluster", authorizeConsole(handleCluster))
+	mux.HandleFunc("/api/cluster/rebalance", authorizeConsole(handleRebalance))
 	mux.HandleFunc("/api/discovery", handleDiscovery)
 
 	// 2. Proxies
-	mux.Handle("/api/proxy/gate/", gateProxy)
-	mux.Handle("/api/proxy/store/", storeProxy)
-	mux.Handle("/api/proxy/queue/", queueProxy)
+	mux.Handle("/api/proxy/gate/", authorizeConsole(gateProxy.ServeHTTP))
+	mux.Handle("/api/proxy/store/", authorizeConsole(storeProxy.ServeHTTP))
+	mux.Handle("/api/proxy/queue/", authorizeConsole(queueProxy.ServeHTTP))
 
 	// 3. Static File Server
 	fileServer := http.FileServer(http.Dir("./web"))
@@ -507,4 +510,84 @@ func discoverySource() string {
 		return "SERVVERSE_DISCOVERY"
 	}
 	return "cli-flags/defaults"
+}
+
+func authorizeConsole(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		jwtSec := os.Getenv("SERV_JWT_SECRET")
+		if jwtSec == "" {
+			next(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			if cookie, err := r.Cookie("token"); err == nil {
+				authHeader = "Bearer " + cookie.Value
+			}
+		}
+
+		if authHeader == "" {
+			http.Error(w, "Unauthorized: missing token", http.StatusUnauthorized)
+			return
+		}
+
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if _, ok := validateJWT(token, []byte(jwtSec)); !ok {
+			http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		next(w, r)
+	}
+}
+
+func validateJWT(tokenStr string, secret []byte) (string, bool) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return "", false
+	}
+
+	headerPart, payloadPart, signaturePart := parts[0], parts[1], parts[2]
+	
+	// Validate signature
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(headerPart + "." + payloadPart))
+	expectedMac := mac.Sum(nil)
+	
+	// Base64Url decode signaturePart
+	sigBytes, err := base64UrlDecode(signaturePart)
+	if err != nil || !hmac.Equal(sigBytes, expectedMac) {
+		return "", false
+	}
+
+	// Base64Url decode payloadPart and extract username, exp
+	payloadBytes, err := base64UrlDecode(payloadPart)
+	if err != nil {
+		return "", false
+	}
+
+	var claims struct {
+		Username string `json:"username"`
+		Exp      int64  `json:"exp"`
+	}
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return "", false
+	}
+
+	// Check expiration
+	if claims.Exp > 0 && time.Now().Unix() > claims.Exp {
+		return "", false
+	}
+
+	return claims.Username, true
+}
+
+func base64UrlDecode(s string) ([]byte, error) {
+	if l := len(s) % 4; l > 0 {
+		s += strings.Repeat("=", 4-l)
+	}
+	s = strings.ReplaceAll(s, "-", "+")
+	s = strings.ReplaceAll(s, "_", "/")
+	return base64.URLEncoding.DecodeString(s)
 }
