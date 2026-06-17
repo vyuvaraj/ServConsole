@@ -58,6 +58,8 @@ function initTabs() {
         fetchTraces();
       } else if (tabId === 'audit') {
         fetchAuditLogs();
+      } else if (tabId === 'database') {
+        fetchDatabaseSchemas();
       }
     });
   });
@@ -893,3 +895,222 @@ function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
+
+// ─── Database Schema ORM Viewer ────────────────────────────────────────────
+
+async function fetchDatabaseSchemas() {
+  const serviceSelect = document.getElementById('db-service-select');
+  const noSchema = document.getElementById('db-no-schema');
+  const schemaVisual = document.getElementById('db-schema-visual');
+
+  try {
+    const res = await fetch('/api/proxy/store/console/schema');
+    if (!res.ok) {
+      noSchema.style.display = 'block';
+      noSchema.innerHTML = `
+        <p style="font-size:2rem; margin-bottom:1rem;">⚠️</p>
+        <p>Could not reach ServStore schema endpoint.</p>
+        <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">Make sure ServStore is online and the schema API is available.</p>
+      `;
+      schemaVisual.style.display = 'none';
+      return;
+    }
+
+    const schemas = await res.json();
+    const serviceNames = Object.keys(schemas);
+
+    // Populate service dropdown
+    serviceSelect.innerHTML = '<option value="">Select Service...</option>';
+    serviceNames.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      serviceSelect.appendChild(opt);
+    });
+
+    // Store schemas in state
+    STATE.dbSchemas = schemas;
+
+    if (serviceNames.length === 0) {
+      noSchema.style.display = 'block';
+      noSchema.innerHTML = `
+        <p style="font-size:2rem; margin-bottom:1rem;">📂</p>
+        <p>No database schemas registered yet.</p>
+        <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">Deploy a Serv-lang service with ORM tables to see them here.</p>
+      `;
+      schemaVisual.style.display = 'none';
+    } else if (serviceNames.length === 1) {
+      // Auto-select the only service
+      serviceSelect.value = serviceNames[0];
+      renderDatabaseSchema(serviceNames[0]);
+    } else {
+      noSchema.style.display = 'block';
+      noSchema.innerHTML = `
+        <p style="font-size:2rem; margin-bottom:1rem;">🗄️</p>
+        <p><strong>${serviceNames.length}</strong> services have registered schemas.</p>
+        <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">Select a service from the dropdown above to visualize its database schema.</p>
+      `;
+      schemaVisual.style.display = 'none';
+    }
+
+    logEvent('store', `Loaded ${serviceNames.length} database schema(s): ${serviceNames.join(', ') || 'none'}`);
+  } catch (err) {
+    noSchema.style.display = 'block';
+    noSchema.innerHTML = `
+      <p style="font-size:2rem; margin-bottom:1rem;">❌</p>
+      <p>Failed to fetch schemas: ${escapeHtml(err.message)}</p>
+    `;
+    schemaVisual.style.display = 'none';
+    logEvent('error', `Database schema fetch failed: ${err.message}`);
+  }
+}
+
+function renderDatabaseSchema(serviceName) {
+  const noSchema = document.getElementById('db-no-schema');
+  const schemaVisual = document.getElementById('db-schema-visual');
+
+  const schema = STATE.dbSchemas?.[serviceName];
+  if (!schema) {
+    noSchema.style.display = 'block';
+    noSchema.innerHTML = `
+      <p style="font-size:2rem; margin-bottom:1rem;">❓</p>
+      <p>No schema found for service: <strong>${escapeHtml(serviceName)}</strong></p>
+    `;
+    schemaVisual.style.display = 'none';
+    return;
+  }
+
+  noSchema.style.display = 'none';
+  schemaVisual.style.display = 'grid';
+  schemaVisual.innerHTML = '';
+
+  // Schema can be an array of tables or an object with tables key
+  let tables = [];
+  if (Array.isArray(schema)) {
+    tables = schema;
+  } else if (schema.tables && Array.isArray(schema.tables)) {
+    tables = schema.tables;
+  } else if (typeof schema === 'object') {
+    // Try treating each key as a table name
+    Object.keys(schema).forEach(key => {
+      if (typeof schema[key] === 'object' && schema[key] !== null) {
+        tables.push({ name: key, ...schema[key] });
+      }
+    });
+  }
+
+  if (tables.length === 0) {
+    noSchema.style.display = 'block';
+    noSchema.innerHTML = `
+      <p style="font-size:2rem; margin-bottom:1rem;">📋</p>
+      <p>Schema registered but contains no tables.</p>
+    `;
+    schemaVisual.style.display = 'none';
+    return;
+  }
+
+  // Color palette for table headers
+  const TABLE_COLORS = [
+    'linear-gradient(135deg, hsl(250, 80%, 55%), hsl(280, 70%, 45%))',
+    'linear-gradient(135deg, hsl(190, 80%, 45%), hsl(210, 70%, 40%))',
+    'linear-gradient(135deg, hsl(145, 70%, 40%), hsl(170, 60%, 35%))',
+    'linear-gradient(135deg, hsl(35, 85%, 50%), hsl(20, 75%, 45%))',
+    'linear-gradient(135deg, hsl(340, 75%, 50%), hsl(355, 65%, 45%))',
+    'linear-gradient(135deg, hsl(50, 80%, 50%), hsl(40, 70%, 40%))',
+  ];
+
+  tables.forEach((table, idx) => {
+    const card = document.createElement('div');
+    card.className = 'db-table-card';
+
+    const tableName = table.name || table.Name || `Table_${idx + 1}`;
+    const columns = table.columns || table.Columns || table.fields || table.Fields || [];
+    const headerColor = TABLE_COLORS[idx % TABLE_COLORS.length];
+
+    card.innerHTML = `
+      <div class="db-table-header" style="background:${headerColor};">
+        <div class="db-table-icon">🗃️</div>
+        <div class="db-table-name">${escapeHtml(tableName)}</div>
+        <div class="db-table-count">${columns.length} col${columns.length !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="db-table-columns">
+        ${columns.length === 0
+          ? '<div class="db-col-row empty">No columns defined</div>'
+          : columns.map(col => renderColumnRow(col)).join('')
+        }
+      </div>
+    `;
+
+    schemaVisual.appendChild(card);
+  });
+
+  logEvent('store', `Rendered ${tables.length} table(s) for service: ${serviceName}`);
+}
+
+function renderColumnRow(col) {
+  const name = col.name || col.Name || col.field || col.Field || '?';
+  const type = col.type || col.Type || col.data_type || col.DataType || 'unknown';
+  const isPK = col.primary_key || col.PrimaryKey || col.pk || col.is_primary || false;
+  const isFK = col.foreign_key || col.ForeignKey || col.fk || col.references || false;
+  const isNullable = col.nullable !== undefined ? col.nullable : (col.Nullable !== undefined ? col.Nullable : true);
+  const isAutoInc = col.auto_increment || col.AutoIncrement || col.autoincrement || false;
+
+  let badges = '';
+  if (isPK) badges += '<span class="db-badge pk" title="Primary Key">PK</span>';
+  if (isFK) badges += `<span class="db-badge fk" title="Foreign Key → ${escapeHtml(String(isFK))}">FK</span>`;
+  if (isAutoInc) badges += '<span class="db-badge ai" title="Auto Increment">AI</span>';
+  if (!isNullable) badges += '<span class="db-badge nn" title="Not Null">NN</span>';
+
+  const typeClass = getTypeClass(type);
+
+  return `
+    <div class="db-col-row ${isPK ? 'primary' : ''}">
+      <div class="db-col-name">
+        ${isPK ? '<span class="db-key-icon">🔑</span>' : '<span class="db-col-dot"></span>'}
+        ${escapeHtml(name)}
+      </div>
+      <div class="db-col-meta">
+        ${badges}
+        <span class="db-type-badge ${typeClass}">${escapeHtml(type)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function getTypeClass(type) {
+  const t = (type || '').toLowerCase();
+  if (t.includes('int') || t.includes('float') || t.includes('double') || t.includes('decimal') || t.includes('numeric') || t.includes('real')) return 'type-number';
+  if (t.includes('varchar') || t.includes('text') || t.includes('char') || t.includes('string')) return 'type-string';
+  if (t.includes('bool')) return 'type-bool';
+  if (t.includes('time') || t.includes('date') || t.includes('timestamp')) return 'type-date';
+  if (t.includes('blob') || t.includes('binary') || t.includes('bytes')) return 'type-binary';
+  if (t.includes('json') || t.includes('jsonb')) return 'type-json';
+  return 'type-other';
+}
+
+// Wire up Database tab UI controls
+document.addEventListener('DOMContentLoaded', () => {
+  const serviceSelect = document.getElementById('db-service-select');
+  if (serviceSelect) {
+    serviceSelect.addEventListener('change', () => {
+      const selected = serviceSelect.value;
+      if (selected) {
+        renderDatabaseSchema(selected);
+      } else {
+        const noSchema = document.getElementById('db-no-schema');
+        const schemaVisual = document.getElementById('db-schema-visual');
+        noSchema.style.display = 'block';
+        noSchema.innerHTML = `
+          <p style="font-size:2rem; margin-bottom:1rem;">📂</p>
+          <p>Select a service to load and visualize its database schema.</p>
+        `;
+        schemaVisual.style.display = 'none';
+      }
+    });
+  }
+
+  const refreshDbBtn = document.getElementById('btn-refresh-database');
+  if (refreshDbBtn) {
+    refreshDbBtn.addEventListener('click', fetchDatabaseSchemas);
+  }
+});

@@ -41,6 +41,10 @@
           <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.26-.81-1-1.4-1.9-1.4h-1v-3c0-.55-.45-1-1-1h-6v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
           Telemetry & Traces
         </button>
+        <button class="tab-btn" data-tab="database">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 4.02 2 6.5s4.48 4.5 10 4.5 10-2.02 10-4.5S17.52 2 12 2zm0 18c-5.52 0-10-2.02-10-4.5v-4c0 2.48 4.48 4.5 10 4.5s10-2.02 10-4.5v4c0 2.48-4.48 4.5-10 4.5zm0-6c-5.52 0-10-2.02-10-4.5v-4c0 2.48 4.48 4.5 10 4.5s10-2.02 10-4.5v4c0 2.48-4.48 4.5-10 4.5z"/></svg>
+          Database (ORM)
+        </button>
         <button class="tab-btn" data-tab="audit">
           <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
           Audit Logs
@@ -374,6 +378,34 @@
                   <!-- Filled dynamically by app.js -->
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: DATABASE -->
+      <div class="tab-pane" id="tab-database">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Database Schema ORM Viewer</h2>
+              <div style="display:flex; gap:1rem;">
+                <select id="db-service-select" class="btn btn-secondary btn-sm" style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.25rem 0.5rem; border-radius:6px; outline:none; cursor:pointer;">
+                  <option value="">Select Service...</option>
+                </select>
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-database">Refresh Schema</button>
+              </div>
+            </div>
+            <p class="section-desc">Visual representation of compiled Serv-lang ORM schemas registered across the ecosystem.</p>
+            
+            <div class="db-viewer-container" style="display:flex; flex-direction:column; gap:1.5rem; margin-top:1.5rem;">
+              <div id="db-no-schema" class="text-center text-muted" style="padding:4rem 0; text-align:center;">
+                <p style="font-size:2rem; margin-bottom:1rem;">📂</p>
+                <p>Select a service to load and visualize its database schema.</p>
+              </div>
+              <div id="db-schema-visual" style="display:none; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:1.5rem;">
+                <!-- Tables rendered dynamically by app.js -->
+              </div>
             </div>
           </div>
         </div>
