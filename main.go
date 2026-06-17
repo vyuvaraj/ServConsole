@@ -13,7 +13,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -292,22 +291,25 @@ func handleRoutes(w http.ResponseWriter, r *http.Request) {
 	configMu.Lock()
 	defer configMu.Unlock()
 
-	// Locate and check if config file exists
-	path, err := filepath.Abs(*gateConfig)
-	if err != nil {
-		http.Error(w, "Invalid config path: "+err.Error(), http.StatusInternalServerError)
-		return
+	var prov ConfigProvider
+	if os.Getenv("SERV_CONFIG_S3_BUCKET") != "" || os.Getenv("SERVVERSE_DISCOVERY") != "" {
+		prov = NewS3ConfigProvider()
+	} else {
+		prov = NewLocalFileProvider(*gateConfig)
 	}
 
-	// Read current routes
-	var cfg GatewayConfig
-	configFile, err := os.Open(path)
-	if err == nil {
-		defer configFile.Close()
-		_ = json.NewDecoder(configFile).Decode(&cfg)
-	} else if !os.IsNotExist(err) {
-		http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
-		return
+	cfg, err := prov.Load()
+	if err != nil {
+		if os.IsNotExist(err) {
+			cfg = &GatewayConfig{
+				Addr:      ":8080",
+				AuthToken: *authToken,
+				Routes:    []Route{},
+			}
+		} else {
+			http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if r.Method == http.MethodPost {
@@ -317,10 +319,9 @@ func handleRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Add or update route prefix
 		found := false
-		for i, r := range cfg.Routes {
-			if r.Prefix == newRoute.Prefix {
+		for i, rt := range cfg.Routes {
+			if rt.Prefix == newRoute.Prefix {
 				cfg.Routes[i] = newRoute
 				found = true
 				break
@@ -330,22 +331,14 @@ func handleRoutes(w http.ResponseWriter, r *http.Request) {
 			cfg.Routes = append(cfg.Routes, newRoute)
 		}
 
-		// Save config.json
-		writeBytes, err := json.MarshalIndent(cfg, "", "  ")
-		if err != nil {
-			http.Error(w, "Marshal error: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if err := os.WriteFile(path, writeBytes, 0644); err != nil {
+		if err := prov.Save(cfg); err != nil {
 			http.Error(w, "Failed to save config: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		log.Printf("Successfully updated ServGate config with route prefix: %s", newRoute.Prefix)
+		log.Printf("Successfully updated config with route prefix: %s", newRoute.Prefix)
 	}
 
-	// Return current list of routes
 	w.Header().Set("Content-Type", "application/json")
 	if cfg.Routes == nil {
 		cfg.Routes = []Route{}
