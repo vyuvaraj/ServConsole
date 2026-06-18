@@ -171,6 +171,28 @@
             </div>
 
             <div class="card-header mt-4">
+              <h2>Topic Administration</h2>
+            </div>
+            <div class="table-container">
+              <table id="topic-admin-table">
+                <thead>
+                  <tr>
+                    <th>Topic</th>
+                    <th>Subscribers</th>
+                    <th>Partitions</th>
+                    <th>WASM Transform</th>
+                    <th>DLQ</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+            <div id="topic-admin-status" class="status-message"></div>
+
+            <div class="card-header mt-4">
               <h2>Register Transform Filter</h2>
             </div>
             <form id="queue-transform-form" class="inline-form">

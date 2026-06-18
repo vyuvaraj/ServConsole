@@ -222,6 +222,67 @@ function refreshQueuesList() {
     </td>
   `;
   tbody.appendChild(tr);
+
+  // Fetch topic administration data
+  fetchTopicAdmin();
+}
+
+async function fetchTopicAdmin() {
+  const tbody = document.querySelector('#topic-admin-table tbody');
+  try {
+    const res = await fetch('/api/proxy/queue/api/topics');
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Unable to fetch topic list</td></tr>`;
+      return;
+    }
+    const data = await res.json();
+    const topics = data.topics || [];
+
+    if (topics.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No topics registered yet</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = '';
+    topics.forEach(topic => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${topic.name}</strong></td>
+        <td>${topic.subscribers}</td>
+        <td>${topic.partitions || 0}</td>
+        <td>${topic.has_transform ? '<span class="badge online">Active</span>' : '<span class="text-muted">None</span>'}</td>
+        <td>${topic.dlq_topic ? `<span class="badge">${topic.dlq_topic}</span>` : '<span class="text-muted">—</span>'}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm" onclick="configureDLQ('${topic.name}')">DLQ</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearWasmTransform('${topic.name}')">Clear WASM</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Error: ${err.message}</td></tr>`;
+  }
+}
+
+function configureDLQ(topic) {
+  const dlqTopic = prompt(`Enter DLQ topic name for "${topic}" (e.g. ${topic}.dlq):`);
+  if (!dlqTopic) return;
+
+  fetch(`/api/proxy/queue/api/topics/${topic}/dlq`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dlq_topic: dlqTopic })
+  }).then(res => {
+    const status = document.getElementById('topic-admin-status');
+    if (res.ok) {
+      status.className = 'status-message success';
+      status.textContent = `✓ DLQ "${dlqTopic}" configured for topic "${topic}"`;
+      fetchTopicAdmin();
+    } else {
+      status.className = 'status-message error';
+      status.textContent = `✗ Failed to configure DLQ`;
+    }
+  });
 }
 
 // --- Storage Tab: Consistent Ring, Buckets, Objects ---
