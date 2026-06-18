@@ -200,6 +200,7 @@ func main() {
 
 	// 1. ServConsole Status Aggregator & Routes API
 	mux.HandleFunc("/api/status", authorizeConsole(handleStatus))
+	mux.HandleFunc("/api/events", authorizeConsole(handleEvents))
 	mux.HandleFunc("/api/routes", authorizeConsole(handleRoutes))
 	mux.HandleFunc("/api/cluster", authorizeConsole(handleCluster))
 	mux.HandleFunc("/api/cluster/rebalance", authorizeConsole(handleRebalance))
@@ -218,9 +219,16 @@ func main() {
 	mux.Handle("/api/proxy/store/", authorizeConsole(storeProxy.ServeHTTP))
 	mux.Handle("/api/proxy/queue/", authorizeConsole(queueProxy.ServeHTTP))
 
-	// 4. Static File Server
 	fileServer := http.FileServer(http.Dir("./web"))
 	mux.Handle("/", fileServer)
+
+	var handler http.Handler = mux
+	handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			r.URL.Path = "/api/" + strings.TrimPrefix(r.URL.Path, "/api/v1/")
+		}
+		mux.ServeHTTP(w, r)
+	})
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Starting ServConsole on http://localhost%s...", addr)
@@ -230,11 +238,14 @@ func main() {
 
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	go startEventBroadcaster(ctx)
+
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -284,6 +295,32 @@ func configureProxyDirector(proxy *httputil.ReverseProxy, target *url.URL, prefi
 		}
 		return nil
 	}
+}
+
+type APIError struct {
+	Error   string `json:"error"`
+	Code    string `json:"code"`
+	TraceID string `json:"trace_id,omitempty"`
+}
+
+func WriteJSONError(w http.ResponseWriter, r *http.Request, msg string, code string, status int) {
+	traceID := ""
+	if r != nil {
+		traceparent := r.Header.Get("traceparent")
+		if traceparent != "" {
+			parts := strings.Split(traceparent, "-")
+			if len(parts) >= 2 {
+				traceID = parts[1]
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(APIError{
+		Error:   msg,
+		Code:    code,
+		TraceID: traceID,
+	})
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -371,7 +408,7 @@ func handleRoutes(w http.ResponseWriter, r *http.Request) {
 				Routes:    []Route{},
 			}
 		} else {
-			http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
+			WriteJSONError(w, r, "Failed to read config: "+err.Error(), "ERR_CONFIG_LOAD_FAILED", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -379,7 +416,7 @@ func handleRoutes(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var newRoute Route
 		if err := json.NewDecoder(r.Body).Decode(&newRoute); err != nil {
-			http.Error(w, "Invalid route payload", http.StatusBadRequest)
+			WriteJSONError(w, r, "Invalid route payload", "ERR_INVALID_ROUTE_PAYLOAD", http.StatusBadRequest)
 			return
 		}
 
@@ -396,7 +433,7 @@ func handleRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := prov.Save(cfg); err != nil {
-			http.Error(w, "Failed to save config: "+err.Error(), http.StatusInternalServerError)
+			WriteJSONError(w, r, "Failed to save config: "+err.Error(), "ERR_CONFIG_SAVE_FAILED", http.StatusInternalServerError)
 			return
 		}
 
@@ -1123,3 +1160,100 @@ func handleDbQuery(w http.ResponseWriter, r *http.Request) {
 	user := r.Header.Get("X-Console-User")
 	addAuditLog(user, fmt.Sprintf("SQL Query (%s): %.60s", driver, query), r.Method, r.URL.Path, http.StatusOK)
 }
+
+var (
+	clients   = make(map[chan string]bool)
+	clientsMu sync.Mutex
+)
+
+func startEventBroadcaster(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			clientsMu.Lock()
+			numClients := len(clients)
+			clientsMu.Unlock()
+			if numClients == 0 {
+				continue
+			}
+
+			statuses := []ComponentStatus{
+				checkStatus("ServGate", *gateUrl, "/"),
+				checkStatus("ServStore", *storeUrl, "/console/metrics"),
+				checkStatus("ServQueue", *queueUrl, "/api/stats"),
+			}
+
+			eventData := map[string]any{
+				"timestamp":  time.Now().Format(time.RFC3339),
+				"components": statuses,
+			}
+
+			bytes, err := json.Marshal(eventData)
+			if err != nil {
+				continue
+			}
+
+			payload := string(bytes)
+			clientsMu.Lock()
+			for ch := range clients {
+				select {
+				case ch <- payload:
+				default:
+				}
+			}
+			clientsMu.Unlock()
+		}
+	}
+}
+
+func handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	ch := make(chan string, 10)
+	clientsMu.Lock()
+	clients[ch] = true
+	clientsMu.Unlock()
+
+	defer func() {
+		clientsMu.Lock()
+		delete(clients, ch)
+		clientsMu.Unlock()
+		close(ch)
+	}()
+
+	statuses := []ComponentStatus{
+		checkStatus("ServGate", *gateUrl, "/"),
+		checkStatus("ServStore", *storeUrl, "/console/metrics"),
+		checkStatus("ServQueue", *queueUrl, "/api/stats"),
+	}
+	initialData, _ := json.Marshal(map[string]any{
+		"timestamp":  time.Now().Format(time.RFC3339),
+		"components": statuses,
+	})
+	fmt.Fprintf(w, "data: %s\n\n", string(initialData))
+	flusher.Flush()
+
+	for {
+		select {
+		case msg := <-ch:
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+

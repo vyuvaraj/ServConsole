@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRouteSerialization(t *testing.T) {
@@ -107,3 +109,43 @@ func TestHandleDbQuerySQLite(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleEvents(t *testing.T) {
+	oldGate := *gateUrl
+	oldStore := *storeUrl
+	oldQueue := *queueUrl
+	defer func() {
+		*gateUrl = oldGate
+		*storeUrl = oldStore
+		*queueUrl = oldQueue
+	}()
+
+	mockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockSrv.Close()
+
+	*gateUrl = mockSrv.URL
+	*storeUrl = mockSrv.URL
+	*queueUrl = mockSrv.URL
+
+	ctxWithCancel, cancelCtx := context.WithCancel(context.Background())
+	reqWithCancel := httptest.NewRequest("GET", "/api/events", nil).WithContext(ctxWithCancel)
+	
+	w2 := httptest.NewRecorder()
+	done2 := make(chan struct{})
+	go func() {
+		defer close(done2)
+		handleEvents(w2, reqWithCancel)
+	}()
+	
+	time.Sleep(100 * time.Millisecond)
+	cancelCtx() // terminate handler
+	<-done2
+
+	resp := w2.Result()
+	if resp.Header.Get("Content-Type") != "text/event-stream" {
+		t.Errorf("expected content type text/event-stream, got %s", resp.Header.Get("Content-Type"))
+	}
+}
+

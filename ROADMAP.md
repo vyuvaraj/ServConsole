@@ -47,10 +47,10 @@ This document outlines the design phases, completed modules, and upcoming featur
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
 | 6.1 | **WebSocket push for real-time dashboards** | Medium | Replace polling with WebSocket/SSE push for live trace ingestion, queue message flow, and route hit counters. | [ ] |
-| 6.2 | **Standardized `/healthz` and `/readyz` endpoints** | Small | Expose health probes for k8s and Docker Compose healthcheck integration. | [ ] |
-| 6.3 | **Graceful shutdown on SIGTERM** | Small | Drain active WebSocket connections and flush state cleanly on shutdown. | [ ] |
+| 6.2 | **Standardized `/healthz` and `/readyz` endpoints** | Small | Expose health probes for k8s and Docker Compose healthcheck integration. | [x] |
+| 6.3 | **Graceful shutdown on SIGTERM** | Small | Drain active WebSocket connections and flush state cleanly on shutdown. | [x] |
 | 6.4 | **Unified health aggregation dashboard** | Medium | Poll `/healthz` on all connected services and display a single "ecosystem health" traffic-light panel. | [ ] |
-| 6.5 | **CI/CD pipeline (GitHub Actions)** | Small | Automated build, test, and format checks on every PR. Currently missing. | [ ] |
+| 6.5 | **CI/CD pipeline (GitHub Actions)** | Small | Automated build, test, and format checks on every PR. Currently missing. | [x] |
 | 6.6 | **RBAC on console access** | Medium | Restrict which dashboard panels/actions are available based on user role (viewer vs operator vs admin). | [ ] |
 | 6.7 | **Dark/light theme toggle** | Small | Currently glassmorphic dark only — add light mode for accessibility and preference. | [ ] |
 | 6.8 | **Cross-service request replay** | Large | Select an OTel trace, click "Replay" to re-issue the original request through ServGate — useful for debugging. | [ ] |
