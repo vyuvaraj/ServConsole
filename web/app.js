@@ -62,6 +62,8 @@ function initTabs() {
         fetchAuditLogs();
       } else if (tabId === 'database') {
         fetchDatabaseSchemas();
+      } else if (tabId === 'policies') {
+        loadPoliciesView();
       }
     });
   });
@@ -1602,4 +1604,198 @@ function drawMockDependencyGraph(ctx, canvas) {
   ];
   
   drawTopology(ctx, canvas, nodes, edges);
+}
+
+// --- Access Control / Policy Editor Logic ---
+let defaultUsers = ['admin', 'developer-bob', 'anonymous'];
+let selectedUser = '';
+
+function getStorageUsers() {
+  const stored = localStorage.getItem('console_users');
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      return defaultUsers;
+    }
+  }
+  localStorage.setItem('console_users', JSON.stringify(defaultUsers));
+  return defaultUsers;
+}
+
+function saveStorageUser(username) {
+  const users = getStorageUsers();
+  if (!users.includes(username)) {
+    users.push(username);
+    localStorage.setItem('console_users', JSON.stringify(users));
+  }
+}
+
+function loadPoliciesView() {
+  const users = getStorageUsers();
+  const listContainer = document.getElementById('policy-users-list');
+  if (!listContainer) return;
+  listContainer.innerHTML = '';
+
+  users.forEach(u => {
+    const item = document.createElement('div');
+    item.className = `user-item ${selectedUser === u ? 'active' : ''}`;
+    item.style.padding = '10px 12px';
+    item.style.borderRadius = '8px';
+    item.style.cursor = 'pointer';
+    item.style.color = selectedUser === u ? 'var(--text-primary)' : 'var(--text-secondary)';
+    item.style.backgroundColor = selectedUser === u ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
+    item.style.borderLeft = selectedUser === u ? '3px solid var(--primary)' : 'none';
+    item.style.marginBottom = '4px';
+    item.style.transition = 'all 0.2s ease';
+    item.style.fontWeight = '500';
+
+    item.innerHTML = `👤 ${u}`;
+    item.addEventListener('click', () => selectUserPolicy(u));
+    listContainer.appendChild(item);
+  });
+
+  // Wire once helper buttons and selection
+  if (!window.policiesWired) {
+    window.policiesWired = true;
+
+    document.getElementById('btn-select-user').addEventListener('click', () => {
+      const usernameInput = document.getElementById('new-user-name');
+      const username = usernameInput.value.trim();
+      if (!username) {
+        alert('Username cannot be empty');
+        return;
+      }
+      saveStorageUser(username);
+      usernameInput.value = '';
+      selectUserPolicy(username);
+    });
+
+    document.getElementById('btn-save-policy').addEventListener('click', async () => {
+      if (!selectedUser) return;
+      const jsonArea = document.getElementById('policy-json-area');
+      const rawJson = jsonArea.value.trim();
+
+      try {
+        JSON.parse(rawJson);
+      } catch (e) {
+        alert('Invalid JSON format: ' + e.message);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/proxy/store/console/users/${selectedUser}/policy`, {
+          method: 'PUT',
+          body: rawJson,
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (res.ok) {
+          logEvent('store', `Saved IAM policy for user: ${selectedUser}`);
+          alert(`Policy for "${selectedUser}" saved successfully!`);
+        } else {
+          const text = await res.text();
+          alert('Failed to save policy: ' + text);
+        }
+      } catch (err) {
+        alert('Network Error: ' + err.message);
+      }
+    });
+
+    document.getElementById('btn-delete-policy').addEventListener('click', async () => {
+      if (!selectedUser) return;
+      if (!confirm(`Are you sure you want to delete policy for user "${selectedUser}"?`)) return;
+
+      try {
+        const res = await fetch(`/api/proxy/store/console/users/${selectedUser}/policy`, {
+          method: 'DELETE'
+        });
+        if (res.ok) {
+          logEvent('store', `Deleted IAM policy for user: ${selectedUser}`);
+          alert(`Policy for "${selectedUser}" deleted`);
+          selectUserPolicy(selectedUser);
+        } else {
+          alert('Failed to delete policy');
+        }
+      } catch (err) {
+        alert('Network Error: ' + err.message);
+      }
+    });
+
+    // Quick Templates
+    document.getElementById('tpl-s3-allow').addEventListener('click', () => {
+      const jsonArea = document.getElementById('policy-json-area');
+      jsonArea.value = JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: ["s3:GetObject", "s3:PutObject"],
+            Resource: ["arn:aws:s3:::*"]
+          }
+        ]
+      }, null, 2);
+    });
+
+    document.getElementById('tpl-stomp-allow').addEventListener('click', () => {
+      const jsonArea = document.getElementById('policy-json-area');
+      jsonArea.value = JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: ["stomp:Publish", "stomp:Subscribe"],
+            Resource: ["arn:aws:stomp:::topic/*"]
+          }
+        ]
+      }, null, 2);
+    });
+
+    document.getElementById('tpl-full-access').addEventListener('click', () => {
+      const jsonArea = document.getElementById('policy-json-area');
+      jsonArea.value = JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: ["s3:*", "stomp:*"],
+            Resource: ["*"]
+          }
+        ]
+      }, null, 2);
+    });
+  }
+}
+
+async function selectUserPolicy(username) {
+  selectedUser = username;
+  loadPoliciesView();
+
+  const titleEl = document.getElementById('policy-current-user');
+  const jsonArea = document.getElementById('policy-json-area');
+  const btnSave = document.getElementById('btn-save-policy');
+  const btnDelete = document.getElementById('btn-delete-policy');
+
+  if (titleEl) titleEl.textContent = username;
+  if (jsonArea) jsonArea.value = '';
+  if (btnSave) btnSave.disabled = true;
+  if (btnDelete) btnDelete.disabled = true;
+
+  try {
+    const res = await fetch(`/api/proxy/store/console/users/${username}/policy`);
+    if (res.status === 404) {
+      jsonArea.value = JSON.stringify({
+        Version: "2012-10-17",
+        Statement: []
+      }, null, 2);
+    } else if (!res.ok) {
+      jsonArea.value = "Failed to load policy";
+    } else {
+      const data = await res.json();
+      jsonArea.value = JSON.stringify(data, null, 2);
+    }
+    if (btnSave) btnSave.disabled = false;
+    if (btnDelete) btnDelete.disabled = false;
+  } catch (err) {
+    if (jsonArea) jsonArea.value = "Error: " + err.message;
+  }
 }

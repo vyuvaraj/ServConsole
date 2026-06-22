@@ -53,6 +53,10 @@
           <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
           Audit Logs
         </button>
+        <button class="tab-btn" data-tab="policies">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+          Policies (RBAC)
+        </button>
       </nav>
 
       <div class="system-status">
@@ -552,6 +556,54 @@
                     <!-- Row values rendered dynamically -->
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: POLICIES (RBAC) -->
+      <div class="tab-pane" id="tab-policies">
+        <div class="pane-grid">
+          <!-- Left: User List & Management -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>IAM Users</h2>
+            </div>
+            <p class="section-desc">Select an IAM user to inspect and edit access control policies.</p>
+            <div class="form-group inline-form">
+              <input type="text" id="new-user-name" placeholder="Username (e.g. developer-bob)" style="flex-grow: 1;">
+              <button class="btn btn-primary" id="btn-select-user">Select / Add</button>
+            </div>
+            <div class="user-select-list" id="policy-users-list" style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem;">
+              <!-- Loaded dynamically -->
+            </div>
+          </div>
+
+          <!-- Right: Policy Editor -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>IAM Policy Editor: <span id="policy-current-user">None Selected</span></h2>
+            </div>
+            <p class="section-desc">Create or edit a JSON IAM policy document for S3 bucket and STOMP topic access.</p>
+            
+            <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+              <div class="form-group">
+                <label for="policy-json-area" style="font-size: 0.85rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">JSON Policy Document</label>
+                <textarea id="policy-json-area" rows="14" class="code-editor" style="width: 100%; font-family: var(--font-mono); font-size: 0.9rem; padding: 0.8rem; background: #0f1120; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; outline: none; resize: vertical;" placeholder='{"Statement":[]}'></textarea>
+              </div>
+
+              <!-- Quick Templates -->
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                <span style="font-size: 0.8rem; color: var(--text-secondary); align-self: center; margin-right: 0.5rem;">Templates:</span>
+                <button class="btn btn-secondary btn-sm" id="tpl-s3-allow">S3 Read/Write</button>
+                <button class="btn btn-secondary btn-sm" id="tpl-stomp-allow">STOMP Pub/Sub</button>
+                <button class="btn btn-secondary btn-sm" id="tpl-full-access">Full Access</button>
+              </div>
+
+              <div class="policy-actions" style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">
+                <button class="btn btn-danger" id="btn-delete-policy" disabled>Delete Policy</button>
+                <button class="btn btn-primary" id="btn-save-policy" disabled>Save Policy</button>
               </div>
             </div>
           </div>
