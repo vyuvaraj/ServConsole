@@ -222,6 +222,56 @@
             <div id="publish-status" class="status-message"></div>
           </div>
         </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Left: WAL Inspector -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Write-Ahead Log (WAL) Inspector</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-wal">Refresh WAL</button>
+            </div>
+            <p class="section-desc">Inspect hot raw incoming messages appended to the write-ahead log (WAL) on disk before rotation.</p>
+            <div class="table-container">
+              <table id="wal-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Topic</th>
+                    <th>Payload Size</th>
+                    <th>Payload Preview</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="4" class="text-center text-muted">No WAL entries recorded</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Delayed Queue Visualization -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Delayed & Scheduled Messages</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-delayed">Refresh Delayed</button>
+            </div>
+            <p class="section-desc">View messages currently stored in the timed-wheel memory queue waiting for delivery.</p>
+            <div class="table-container">
+              <table id="delayed-messages-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Topic</th>
+                    <th>Delay Remaining</th>
+                    <th>Payload</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="4" class="text-center text-muted">No delayed messages scheduled</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- TAB: STORAGE -->

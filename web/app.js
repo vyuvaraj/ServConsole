@@ -225,6 +225,8 @@ function refreshQueuesList() {
 
   // Fetch topic administration data
   fetchTopicAdmin();
+  fetchWAL();
+  fetchDelayedMessages();
 }
 
 async function fetchTopicAdmin() {
@@ -701,6 +703,93 @@ function initForms() {
   document.getElementById('btn-clear-logs').addEventListener('click', () => {
     document.getElementById('console-logs-screen').innerHTML = '';
   });
+
+  // Queue WAL & Delayed triggers
+  document.getElementById('btn-refresh-wal').addEventListener('click', fetchWAL);
+  document.getElementById('btn-refresh-delayed').addEventListener('click', fetchDelayedMessages);
+}
+
+async function fetchWAL() {
+  const tbody = document.querySelector('#wal-table tbody');
+  if (!tbody) return;
+  try {
+    const res = await fetch('/api/proxy/queue/api/stats');
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Unable to fetch WAL</td></tr>`;
+      return;
+    }
+    const data = await res.json();
+    const entries = data.wal_entries || [];
+
+    if (entries.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No WAL entries recorded</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = '';
+    entries.forEach(entry => {
+      const tr = document.createElement('tr');
+      const date = new Date(entry.Timestamp / 1000000);
+      const timeStr = date.toLocaleTimeString() + '.' + String(entry.Timestamp % 1000000).padStart(6, '0').slice(0, 3);
+      const preview = entry.Payload.length > 60 ? entry.Payload.slice(0, 60) + '...' : entry.Payload;
+      tr.innerHTML = `
+        <td style="font-family:var(--font-mono); font-size:0.85rem;">${timeStr}</td>
+        <td><strong>${entry.Topic}</strong></td>
+        <td>${entry.Payload.length} bytes</td>
+        <td style="font-family:var(--font-mono); font-size:0.85rem;">${escapeHtml(preview)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Error: ${err.message}</td></tr>`;
+  }
+}
+
+async function fetchDelayedMessages() {
+  const tbody = document.querySelector('#delayed-messages-table tbody');
+  if (!tbody) return;
+  try {
+    const res = await fetch('/api/proxy/queue/api/stats');
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Unable to fetch delayed messages</td></tr>`;
+      return;
+    }
+    const data = await res.json();
+    const msgs = data.delayed_messages || [];
+
+    if (msgs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No delayed messages scheduled</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = '';
+    msgs.forEach(msg => {
+      const tr = document.createElement('tr');
+      const targetTime = new Date(msg.target_time);
+      const diffMs = Math.max(0, targetTime.getTime() - Date.now());
+      const delayStr = (diffMs / 1000).toFixed(1) + 's';
+      const preview = msg.payload.length > 40 ? msg.payload.slice(0, 40) + '...' : msg.payload;
+      tr.innerHTML = `
+        <td style="font-family:var(--font-mono); font-size:0.85rem;">${msg.id}</td>
+        <td><strong>${msg.topic}</strong></td>
+        <td><span class="badge" style="background-color: var(--warning); color: #000;">${delayStr}</span></td>
+        <td style="font-family:var(--font-mono); font-size:0.85rem;">${escapeHtml(preview)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Error: ${err.message}</td></tr>`;
+  }
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 // --- Console Log Event helper ---
