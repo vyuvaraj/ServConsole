@@ -25,6 +25,8 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 	_ "github.com/sijms/go-ora/v2"
+
+	"github.com/vyuvaraj/ServShared"
 )
 
 var (
@@ -189,14 +191,8 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Health probes
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"healthy"}`))
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"healthy"}`))
-	})
+	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
+	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
 
 	// 1. ServConsole Status Aggregator & Routes API
 	mux.HandleFunc("/api/status", authorizeConsole(handleStatus))

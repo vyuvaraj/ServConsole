@@ -30,15 +30,15 @@ This document outlines the design phases, completed modules, and upcoming featur
 
 ### Phase 4: Enterprise Access Control & Audit Logs (Q1 2027)
 * [x] **Console SSO**: Integrated OIDC/OAuth2 and LDAP user sign-ins.
-* [ ] **User Policies (RBAC) Editor**: Create and apply granular user security policies for S3 buckets and STOMP topics.
+* [x] **User Policies (RBAC) Editor**: Create and apply granular user security policies for S3 buckets and STOMP topics.
 * [x] **Audit Logs Dashboard**: Track administrative operations (e.g. WASM hot-swaps, route creations) in a secure immutable log table.
 
 ### Phase 5: Ecosystem Integration Depth (Q2 2027)
 * [x] **Service Discovery Config**: Replace hardcoded localhost ports with a `services.json` or `SERVVERSE_DISCOVERY` env-var discovery map — prerequisite for Docker Compose and Kubernetes deployments.
 * [ ] **Shared OTel Collector Config**: Surface a single `SERV_OTLP_ENDPOINT` setting propagated to all connected services; enables unified cross-service trace correlation in one UI.
-* [ ] **ServQueue Topic Admin**: Full WAL inspection, delayed message queue view, and WASM transform debug panels in the dashboard.
+* [x] **ServQueue Topic Admin**: Full WAL inspection, delayed message queue view, and WASM transform debug panels in the dashboard.
 * [ ] **ServGate Multi-Replica Config Sync**: Write route configurations to a ServStore-backed distributed bucket (`serv-config`) instead of local JSON file.
-* [ ] **Cross-Service Dependency Graph**: Visual interactive map showing which Serv services depend on which infrastructure components (queues, buckets, routes).
+* [x] **Cross-Service Dependency Graph**: Visual interactive map showing which Serv services depend on which infrastructure components (queues, buckets, routes).
 
 ---
 
