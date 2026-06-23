@@ -711,6 +711,8 @@ function initForms() {
   // Telemetry triggers
   document.getElementById('btn-refresh-traces').addEventListener('click', fetchTraces);
   document.getElementById('btn-refresh-graph').addEventListener('click', fetchDependencyGraph);
+  document.getElementById('btn-clear-traces')?.addEventListener('click', clearTraces);
+  document.getElementById('trace-search')?.addEventListener('input', filterTraces);
   document.getElementById('btn-clear-logs').addEventListener('click', () => {
     document.getElementById('console-logs-screen').innerHTML = '';
   });
@@ -859,6 +861,7 @@ function renderClusterNodes(data) {
       <td>${statusDot}</td>
       <td style="color:var(--text-secondary);">${lagLabel}</td>
       <td><span class="lag-badge ${node.lag_status}">${node.lag_status.toUpperCase()}</span></td>
+      <td><button class="btn btn-secondary btn-sm" onclick="switchToTracesTab('S3')">View Traces</button></td>
     `;
     tbody.appendChild(tr);
   });
@@ -1549,6 +1552,214 @@ async function fetchDependencyGraph() {
     startGraphRenderLoop(ctx, canvas);
   }
 }
+
+// --- OpenTelemetry Distributed Tracing (Observability Link) ---
+let loadedTraces = [];
+
+async function fetchTraces() {
+  const tbody = document.querySelector('#traces-table tbody');
+  if (!tbody) return;
+  try {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Loading traces...</td></tr>`;
+    const res = await fetch('/api/proxy/trace/api/traces');
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Failed to load traces from ServTrace</td></tr>`;
+      return;
+    }
+    loadedTraces = await res.json();
+    // Sort descending by timestamp
+    loadedTraces.sort((a, b) => b.timestampUnixNano - a.timestampUnixNano);
+    renderTraceList(loadedTraces);
+    logEvent('trace', `Loaded ${loadedTraces.length} traces`);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Error: ${err.message}</td></tr>`;
+    logEvent('error', `Failed to fetch traces: ${err.message}`);
+  }
+}
+
+function renderTraceList(traces) {
+  const tbody = document.querySelector('#traces-table tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  
+  if (traces.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No traces found in ServTrace</td></tr>`;
+    return;
+  }
+  
+  traces.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.className = 'trace-item-row';
+    tr.dataset.traceId = t.traceId;
+    
+    // Formatting timestamp
+    const date = new Date(t.timestampUnixNano / 1000000);
+    const timeStr = date.toLocaleTimeString() + '.' + String(t.timestampUnixNano % 1000000).padStart(6, '0').slice(0, 3);
+    
+    const statusClass = t.errorCount > 0 ? 'badge offline' : 'badge online';
+    const statusLabel = t.errorCount > 0 ? `${t.errorCount} ERR` : 'OK';
+    const serviceClass = `waterfall-span-service service-${t.service.toLowerCase()}`;
+    
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono); font-size:0.8rem;">${timeStr}</td>
+      <td style="font-family:var(--font-mono); font-size:0.8rem; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${t.traceId}">${t.traceId}</td>
+      <td><strong>${escapeHtml(t.rootName)}</strong></td>
+      <td><span class="${serviceClass}">${escapeHtml(t.service)}</span></td>
+      <td style="font-family:var(--font-mono);">${t.durationMs.toFixed(2)} ms</td>
+      <td>${t.totalSpans}</td>
+      <td><span class="${statusClass}">${statusLabel}</span></td>
+    `;
+    
+    tr.addEventListener('click', () => {
+      document.querySelectorAll('.trace-item-row').forEach(r => r.classList.remove('active'));
+      tr.classList.add('active');
+      showTraceDetail(t.traceId);
+    });
+    
+    tbody.appendChild(tr);
+  });
+}
+
+function filterTraces() {
+  const query = document.getElementById('trace-search').value.toLowerCase();
+  const filtered = loadedTraces.filter(t => 
+    t.traceId.toLowerCase().includes(query) || 
+    t.rootName.toLowerCase().includes(query) || 
+    t.service.toLowerCase().includes(query)
+  );
+  renderTraceList(filtered);
+}
+
+async function clearTraces() {
+  if (!confirm('Are you sure you want to clear all trace records from ServTrace memory?')) return;
+  try {
+    const res = await fetch('/api/proxy/trace/api/traces/', { method: 'DELETE' });
+    if (res.ok) {
+      logEvent('trace', 'Traces cleared successfully');
+      fetchTraces();
+      document.getElementById('traces-timeline').innerHTML = `
+        <div class="text-center text-muted" style="padding: 4rem 0;">Select a trace from the logs on the left to view the distributed spans execution tree.</div>
+      `;
+      document.getElementById('waterfall-trace-id-badge').textContent = 'No Trace Selected';
+    } else {
+      alert('Failed to clear traces');
+    }
+  } catch (err) {
+    logEvent('error', `Failed to clear traces: ${err.message}`);
+  }
+}
+
+async function showTraceDetail(traceId) {
+  const timeline = document.getElementById('traces-timeline');
+  const badge = document.getElementById('waterfall-trace-id-badge');
+  if (!timeline) return;
+  
+  badge.textContent = `TRACE ID: ${traceId.slice(0, 8)}...`;
+  timeline.innerHTML = `<div class="text-center text-muted" style="padding: 4rem 0;">Loading trace tree...</div>`;
+  
+  try {
+    const res = await fetch(`/api/proxy/trace/api/traces/${traceId}`);
+    if (!res.ok) {
+      timeline.innerHTML = `<div class="text-center text-muted">Failed to load trace detail</div>`;
+      return;
+    }
+    const rootNode = await res.json();
+    timeline.innerHTML = '';
+    
+    // We want to find the max duration of the trace to compute bar widths relative to total duration
+    const totalDuration = findMaxDuration(rootNode);
+    renderSpanNodeWaterfall(timeline, rootNode, totalDuration, 0);
+  } catch (err) {
+    timeline.innerHTML = `<div class="text-center text-muted">Error loading tree: ${err.message}</div>`;
+  }
+}
+
+function findMaxDuration(node) {
+  let max = node.offsetMs + node.durationMs;
+  if (node.children) {
+    node.children.forEach(c => {
+      const childMax = findMaxDuration(c);
+      if (childMax > max) max = childMax;
+    });
+  }
+  return max;
+}
+
+function renderSpanNodeWaterfall(container, node, totalDuration, depth) {
+  if (!node) return;
+  
+  const row = document.createElement('div');
+  row.className = 'waterfall-span-row';
+  
+  const service = (node.span.service || 'unknown').toLowerCase();
+  const serviceClass = `waterfall-span-service service-${service}`;
+  const barClass = `waterfall-bar waterfall-bar-${service} ${node.span.status === 2 ? 'error' : 'success'}`;
+  
+  // Calculate width and offset %
+  const pctWidth = totalDuration > 0 ? (node.durationMs / totalDuration) * 100 : 100;
+  const pctOffset = totalDuration > 0 ? (node.offsetMs / totalDuration) * 100 : 0;
+  
+  const indent = depth * 15;
+  const hasAttributes = node.span.attributes && Object.keys(node.span.attributes).length > 0;
+  const uniqueId = `attr-${node.span.spanId}`;
+  
+  row.innerHTML = `
+    <div class="waterfall-span-main">
+      <div class="waterfall-span-info" style="padding-left: ${indent}px;">
+        <span class="${serviceClass}">${escapeHtml(node.span.service || 'unknown')}</span>
+        <span class="waterfall-span-name" title="${escapeHtml(node.span.name)}">${escapeHtml(node.span.name)}</span>
+        ${hasAttributes ? `<span style="font-size:0.75rem; cursor:pointer; color:var(--primary);" onclick="toggleSpanAttr('${uniqueId}')">ⓘ</span>` : ''}
+      </div>
+      <div class="waterfall-timeline-track">
+        <div class="${barClass}" style="left: ${pctOffset}%; width: ${pctWidth}%;"></div>
+        <div class="waterfall-duration-label" style="left: ${pctOffset + pctWidth}%;">${node.durationMs.toFixed(1)}ms</div>
+      </div>
+    </div>
+    ${hasAttributes ? `
+      <div class="waterfall-span-details" id="${uniqueId}" style="display: none;">
+        <div class="attributes-grid">
+          ${Object.entries(node.span.attributes).map(([k, v]) => `
+            <div class="attr-key">${escapeHtml(k)}</div>
+            <div class="attr-val">${escapeHtml(String(v))}</div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+  `;
+  
+  container.appendChild(row);
+  
+  if (node.children) {
+    // Sort children by start offset
+    node.children.sort((a, b) => a.offsetMs - b.offsetMs);
+    node.children.forEach(child => {
+      renderSpanNodeWaterfall(container, child, totalDuration, depth + 1);
+    });
+  }
+}
+
+function toggleSpanAttr(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+}
+window.toggleSpanAttr = toggleSpanAttr;
+
+function switchToTracesTab(filterQuery) {
+  const tracesBtn = document.querySelector('.tab-btn[data-tab="traces"]');
+  if (tracesBtn) {
+    tracesBtn.click();
+    if (filterQuery) {
+      const searchInput = document.getElementById('trace-search');
+      if (searchInput) {
+        searchInput.value = filterQuery;
+        filterTraces();
+      }
+    }
+  }
+}
+window.switchToTracesTab = switchToTracesTab;
 
 function loadMockGraphData() {
   graphNodes = [

@@ -34,6 +34,7 @@ var (
 	gateUrl    = flag.String("gate-url", "http://localhost:8080", "ServGate base URL")
 	storeUrl   = flag.String("store-url", "http://localhost:8081", "ServStore base URL")
 	queueUrl   = flag.String("queue-url", "http://localhost:8082", "ServQueue base URL")
+	traceUrl   = flag.String("trace-url", "http://localhost:8090", "ServTrace base URL")
 	authToken  = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
 	gateConfig = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
 )
@@ -45,6 +46,7 @@ type ServDiscovery struct {
 	Gate         string `json:"gate"`          // ServGate base URL
 	Store        string `json:"store"`         // ServStore base URL
 	Queue        string `json:"queue"`         // ServQueue base URL
+	Trace        string `json:"trace"`         // ServTrace base URL
 	ConsolePort  int    `json:"console_port"` // Override listen port
 	JWTSecret    string `json:"jwt_secret"`   // Shared JWT signing secret
 	OTLPEndpoint string `json:"otlp_endpoint"` // Shared OpenTelemetry collector
@@ -62,6 +64,7 @@ func loadDiscovery() ServDiscovery {
 		Gate:         *gateUrl,
 		Store:        *storeUrl,
 		Queue:        *queueUrl,
+		Trace:        *traceUrl,
 		ConsolePort:  *port,
 		AuthToken:    *authToken,
 		GateConfig:   *gateConfig,
@@ -102,6 +105,7 @@ func loadDiscovery() ServDiscovery {
 	if manifest.JWTSecret != "" { d.JWTSecret = manifest.JWTSecret }
 	if manifest.OTLPEndpoint != "" { d.OTLPEndpoint = manifest.OTLPEndpoint }
 	if manifest.GateConfig != "" { d.GateConfig = manifest.GateConfig }
+	if manifest.Trace != "" { d.Trace = manifest.Trace }
 
 	return d
 }
@@ -149,6 +153,7 @@ func main() {
 	*gateUrl    = activeDiscovery.Gate
 	*storeUrl   = activeDiscovery.Store
 	*queueUrl   = activeDiscovery.Queue
+	*traceUrl   = activeDiscovery.Trace
 	*port       = activeDiscovery.ConsolePort
 	*authToken  = activeDiscovery.AuthToken
 	*gateConfig = activeDiscovery.GateConfig
@@ -156,6 +161,7 @@ func main() {
 	log.Printf("[discovery] ServGate  → %s", *gateUrl)
 	log.Printf("[discovery] ServStore → %s", *storeUrl)
 	log.Printf("[discovery] ServQueue → %s", *queueUrl)
+	log.Printf("[discovery] ServTrace → %s", *traceUrl)
 	if activeDiscovery.OTLPEndpoint != "" {
 		log.Printf("[discovery] OTLP      → %s", activeDiscovery.OTLPEndpoint)
 	}
@@ -179,16 +185,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("Invalid queue-url: %v", err)
 	}
+	tURL, err := url.Parse(*traceUrl)
+	if err != nil {
+		log.Fatalf("Invalid trace-url: %v", err)
+	}
 
 	// Create reverse proxies
 	gateProxy := httputil.NewSingleHostReverseProxy(gURL)
 	storeProxy := httputil.NewSingleHostReverseProxy(sURL)
 	queueProxy := httputil.NewSingleHostReverseProxy(qURL)
+	traceProxy := httputil.NewSingleHostReverseProxy(tURL)
 
 	// Adjust Director to rewrite request path and set Authorization headers
 	configureProxyDirector(gateProxy, gURL, "/api/proxy/gate", *authToken)
 	configureProxyDirector(storeProxy, sURL, "/api/proxy/store", "")
 	configureProxyDirector(queueProxy, qURL, "/api/proxy/queue", "secret-token")
+	configureProxyDirector(traceProxy, tURL, "/api/proxy/trace", "")
 
 	mux := http.NewServeMux()
 
@@ -218,6 +230,7 @@ func main() {
 	mux.Handle("/api/proxy/gate/", authorizeConsole(gateProxy.ServeHTTP))
 	mux.Handle("/api/proxy/store/", authorizeConsole(storeProxy.ServeHTTP))
 	mux.Handle("/api/proxy/queue/", authorizeConsole(queueProxy.ServeHTTP))
+	mux.Handle("/api/proxy/trace/", authorizeConsole(traceProxy.ServeHTTP))
 
 	fileServer := http.FileServer(http.Dir("./web"))
 	mux.Handle("/", fileServer)

@@ -8,6 +8,117 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="index.css">
+  <style>
+    /* Premium Observability & Waterfall Tracing Styles */
+    .trace-item-row {
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+    .trace-item-row:hover {
+      background-color: rgba(255, 255, 255, 0.05) !important;
+    }
+    .trace-item-row.active {
+      background-color: rgba(99, 102, 241, 0.15) !important;
+      border-left: 3px solid var(--primary);
+    }
+    .waterfall-span-row {
+      display: flex;
+      flex-direction: column;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      padding: 0.5rem 0.25rem;
+    }
+    .waterfall-span-row:hover {
+      background-color: rgba(255, 255, 255, 0.02);
+    }
+    .waterfall-span-main {
+      display: flex;
+      align-items: center;
+      width: 100%;
+    }
+    .waterfall-span-info {
+      width: 35%;
+      min-width: 200px;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .waterfall-span-name {
+      font-weight: 500;
+      color: #f1f5f9;
+    }
+    .waterfall-span-service {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+    }
+    .service-servgate { background-color: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.3); }
+    .service-servqueue { background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .service-servstore { background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .service-servtrace { background-color: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+    .service-unknown { background-color: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+    
+    .waterfall-timeline-track {
+      flex-grow: 1;
+      height: 24px;
+      position: relative;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 4px;
+    }
+    .waterfall-bar {
+      position: absolute;
+      height: 60%;
+      top: 20%;
+      border-radius: 3px;
+      min-width: 3px;
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+    .waterfall-bar.success { opacity: 0.85; }
+    .waterfall-bar.error {
+      background-color: rgba(239, 68, 68, 0.7) !important;
+      border: 1px solid #ef4444 !important;
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+    }
+    .waterfall-bar-gate { background-color: #06b6d4; border: 1px solid #22d3ee; }
+    .waterfall-bar-queue { background-color: #f59e0b; border: 1px solid #fbbf24; }
+    .waterfall-bar-store { background-color: #10b981; border: 1px solid #34d399; }
+    .waterfall-bar-trace { background-color: #a855f7; border: 1px solid #c084fc; }
+    .waterfall-bar-unknown { background-color: #94a3b8; border: 1px solid #cbd5e1; }
+
+    .waterfall-duration-label {
+      position: absolute;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      font-family: var(--font-mono);
+      top: 50%;
+      transform: translateY(-50%);
+      padding-left: 0.5rem;
+      white-space: nowrap;
+    }
+    .waterfall-span-details {
+      margin-left: 35%;
+      margin-top: 0.25rem;
+      padding: 0.5rem;
+      background: rgba(15, 17, 32, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+      font-size: 0.78rem;
+    }
+    .attributes-grid {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 0.25rem 1rem;
+    }
+    .attr-key { color: #94a3b8; font-family: var(--font-mono); }
+    .attr-val { color: #e2e8f0; word-break: break-all; }
+  </style>
 </head>
 <body>
   <!-- Aurora Background Effect -->
@@ -392,6 +503,7 @@
                     <th>Status</th>
                     <th>Last Heartbeat</th>
                     <th>Replication Lag</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="cluster-nodes-body">
@@ -434,18 +546,50 @@
 
       <!-- TAB: TELEMETRY -->
       <div class="tab-pane" id="tab-traces">
-        <div class="pane-grid vertical-stack">
-          <!-- Top: OpenTelemetry Traces Visualizer -->
-          <div class="card glass-card">
+        <div class="pane-grid">
+          <!-- Left: Traces List -->
+          <div class="card glass-card span-2">
             <div class="card-header">
-              <h2>OpenTelemetry Distributed Tracing Flow</h2>
-              <button class="btn btn-secondary btn-sm" id="btn-refresh-traces">Refresh Traces</button>
+              <h2>Trace Logs</h2>
+              <div class="filter-group" style="display:flex; gap:0.5rem; align-items:center;">
+                <input type="text" id="trace-search" placeholder="Filter by root span / service..." class="form-control" style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.4rem; border-radius:6px; outline:none; font-size:0.85rem;">
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-traces">↻ Refresh</button>
+                <button class="btn btn-danger btn-sm" id="btn-clear-traces">Clear Traces</button>
+              </div>
             </div>
-            <div class="trace-spans-container" id="traces-timeline">
-              <!-- Waterfall trace visualizer goes here -->
+            <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+              <table id="traces-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Trace ID</th>
+                    <th>Root Operation</th>
+                    <th>Service</th>
+                    <th>Duration</th>
+                    <th>Spans</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="7" class="text-center text-muted">Click Refresh to load traces</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
+          <!-- Right: Selected Trace Waterfall -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Trace Timeline Waterfall</h2>
+              <span class="badge online" id="waterfall-trace-id-badge">No Trace Selected</span>
+            </div>
+            <div class="trace-spans-container" id="traces-timeline" style="margin-top: 1rem; min-height: 300px; max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem;">
+              <div class="text-center text-muted" style="padding: 4rem 0;">Select a trace from the logs on the left to view the distributed spans execution tree.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pane-grid vertical-stack mt-4">
           <!-- Bottom: Live Logs Console -->
           <div class="card glass-card">
             <div class="card-header">
