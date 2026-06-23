@@ -126,6 +126,7 @@ type GatewayConfig struct {
 	TlsCert   string  `json:"tls_cert"`
 	TlsKey    string  `json:"tls_key"`
 	Routes    []Route `json:"routes"`
+	Signature string  `json:"signature,omitempty"`
 }
 
 type ComponentStatus struct {
@@ -469,6 +470,53 @@ func handleRoutes(w http.ResponseWriter, r *http.Request) {
 		user := r.Header.Get("X-Console-User")
 		addAuditLog(user, "Register/Update API Route: "+newRoute.Prefix, r.Method, r.URL.Path, http.StatusOK)
 		log.Printf("Successfully updated config with route prefix: %s", newRoute.Prefix)
+	}
+
+	if r.Method == http.MethodDelete {
+		prefix := r.URL.Query().Get("prefix")
+		if prefix == "" {
+			WriteJSONError(w, r, "Missing prefix query parameter", "ERR_INVALID_ROUTE_PAYLOAD", http.StatusBadRequest)
+			return
+		}
+
+		newRoutes := []Route{}
+		found := false
+		for _, rt := range cfg.Routes {
+			if rt.Prefix == prefix {
+				found = true
+			} else {
+				newRoutes = append(newRoutes, rt)
+			}
+		}
+
+		if !found {
+			WriteJSONError(w, r, "Route not found", "ERR_ROUTE_NOT_FOUND", http.StatusNotFound)
+			return
+		}
+
+		cfg.Routes = newRoutes
+		if err := prov.Save(cfg); err != nil {
+			WriteJSONError(w, r, "Failed to save config: "+err.Error(), "ERR_CONFIG_SAVE_FAILED", http.StatusInternalServerError)
+			return
+		}
+
+		// Forward to ServGate
+		gateDeleteUrl := fmt.Sprintf("%s/api/routes?prefix=%s", strings.TrimSuffix(*gateUrl, "/"), url.QueryEscape(prefix))
+		greq, gerr := http.NewRequest(http.MethodDelete, gateDeleteUrl, nil)
+		if greq != nil && gerr == nil {
+			if *authToken != "" {
+				greq.Header.Set("Authorization", "Bearer "+*authToken)
+			}
+			gclient := &http.Client{Timeout: 3 * time.Second}
+			gresp, gerr2 := gclient.Do(greq)
+			if gerr2 == nil {
+				gresp.Body.Close()
+			}
+		}
+
+		user := r.Header.Get("X-Console-User")
+		addAuditLog(user, "Delete API Route: "+prefix, r.Method, r.URL.Path, http.StatusOK)
+		log.Printf("Successfully deleted route prefix: %s", prefix)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

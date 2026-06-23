@@ -118,6 +118,7 @@
                     <th>AI Security</th>
                     <th>Semantic Cache</th>
                     <th>PII Redact</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -146,6 +147,31 @@
               <button type="submit" class="btn btn-success w-100">Upload & Hot-Swap</button>
             </form>
             <div id="wasm-status-message" class="status-message"></div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Active Connections Panel -->
+          <div class="card glass-card span-3">
+            <div class="card-header">
+              <h2>Active Gateway Connections</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-connections">↻ Refresh</button>
+            </div>
+            <p class="section-desc">Real-time connection metrics showing active workloads per target server backend routed via ServGate.</p>
+            <div class="table-container">
+              <table id="connections-table">
+                <thead>
+                  <tr>
+                    <th>Backend Target URL</th>
+                    <th>Active Connections Count</th>
+                    <th>Load Indicator</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="3" class="text-center text-muted">No active connections recorded</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>

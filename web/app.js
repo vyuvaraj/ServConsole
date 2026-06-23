@@ -95,6 +95,7 @@ function initPolling() {
       // If we are on gateways tab, refresh routes list if details changed
       if (STATE.activeTab === 'gateways') {
         refreshRoutesList();
+        fetchConnections();
       } else if (STATE.activeTab === 'queues') {
         refreshQueuesList();
       }
@@ -195,6 +196,9 @@ async function refreshRoutesList() {
         <td>${route.prompt_guard ? '✅ Active' : '—'}</td>
         <td>${route.semantic_cache ? '✅ Active' : '—'}</td>
         <td>${route.pii_redact ? '✅ Active' : '—'}</td>
+        <td>
+          <button class="btn btn-danger btn-sm" onclick="deleteRoute('${route.prefix}')">Delete</button>
+        </td>
       `;
       tbody.appendChild(tr);
     });
@@ -2011,4 +2015,71 @@ document.addEventListener('DOMContentLoaded', () => {
   if (refreshMigBtn) {
     refreshMigBtn.addEventListener('click', fetchMigrations);
   }
+});
+
+// --- Gateways Connection Stats & Route Deletion ---
+async function fetchConnections() {
+  try {
+    const res = await fetch('/api/proxy/gate/api/admin/connections');
+    if (!res.ok) return;
+    const conns = await res.json();
+    const tbody = document.querySelector('#connections-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    
+    const keys = Object.keys(conns);
+    if (keys.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No active connections recorded</td></tr>`;
+      return;
+    }
+    
+    keys.forEach(target => {
+      const count = conns[target];
+      const tr = document.createElement('tr');
+      
+      let loadBadge = '<span class="badge online">LOW</span>';
+      if (count > 50) {
+        loadBadge = '<span class="badge offline">HIGH</span>';
+      } else if (count > 10) {
+        loadBadge = '<span class="badge degraded">MODERATE</span>';
+      }
+      
+      tr.innerHTML = `
+        <td><span style="font-family:var(--font-mono);">${target}</span></td>
+        <td><strong>${count}</strong></td>
+        <td>${loadBadge}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    // silent fallback
+  }
+}
+
+async function deleteRoute(prefix) {
+  if (!confirm(`Are you sure you want to delete route "${prefix}"?`)) {
+    return;
+  }
+  try {
+    const res = await fetch(`/api/routes?prefix=${encodeURIComponent(prefix)}`, {
+      method: 'DELETE'
+    });
+    if (res.ok) {
+      logEvent('system', `Deleted route prefix: ${prefix}`);
+      refreshRoutesList();
+      fetchConnections();
+    } else {
+      const errData = await res.json();
+      logEvent('error', `Failed to delete route: ${errData.error || res.statusText}`);
+    }
+  } catch (err) {
+    logEvent('error', `Failed to delete route: ${err.message}`);
+  }
+}
+
+// Bind manual refresh connection button
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    document.getElementById('btn-refresh-connections')?.addEventListener('click', fetchConnections);
+  }, 1000);
 });
