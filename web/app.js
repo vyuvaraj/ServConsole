@@ -1448,6 +1448,13 @@ async function runSqlQuery() {
 }
 
 // --- Cross-Service Dependency Graph (Item 6) ---
+let graphNodes = [];
+let graphEdges = [];
+let draggedNode = null;
+let selectedNode = null;
+let graphAnimationId = null;
+let flowParticles = [];
+
 async function fetchDependencyGraph() {
   const canvas = document.getElementById('graph-canvas');
   if (!canvas) return;
@@ -1460,99 +1467,180 @@ async function fetchDependencyGraph() {
   ctx.textAlign = 'center';
   ctx.fillText('Auto-discovering service topology...', canvas.width / 2, canvas.height / 2);
   
+  // Setup mouse events once
+  if (!canvas.dataset.eventsAttached) {
+    canvas.dataset.eventsAttached = 'true';
+    
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      draggedNode = null;
+      selectedNode = null;
+      
+      for (const node of graphNodes) {
+        const dx = mouseX - node.x;
+        const dy = mouseY - node.y;
+        if (Math.sqrt(dx * dx + dy * dy) <= 45) {
+          draggedNode = node;
+          selectedNode = node;
+          logEvent('console', `Selected topology node: ${node.id}`);
+          break;
+        }
+      }
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+      if (!draggedNode) return;
+      const rect = canvas.getBoundingClientRect();
+      draggedNode.x = Math.max(45, Math.min(canvas.width - 45, e.clientX - rect.left));
+      draggedNode.y = Math.max(45, Math.min(canvas.height - 45, e.clientY - rect.top));
+    });
+    
+    canvas.addEventListener('mouseup', () => { draggedNode = null; });
+    canvas.addEventListener('mouseleave', () => { draggedNode = null; });
+  }
+  
   try {
-    const res = await fetch('/api/proxy/store/console/traces');
+    const res = await fetch('/api/topology');
     if (!res.ok) {
-      drawMockDependencyGraph(ctx, canvas);
+      loadMockGraphData();
+      startGraphRenderLoop(ctx, canvas);
       return;
     }
-    const spans = await res.json();
-    if (!spans || spans.length === 0) {
-      drawMockDependencyGraph(ctx, canvas);
+    const data = await res.json();
+    if (!data.nodes || data.nodes.length === 0) {
+      loadMockGraphData();
+      startGraphRenderLoop(ctx, canvas);
       return;
     }
-    
-    const nodes = new Map();
-    const edges = [];
-    const edgeSet = new Set();
-    
-    nodes.set('ServGate', { id: 'ServGate', label: 'ServGate (Gateway)', x: 150, y: 250, color: '#06b6d4' });
-    
-    spans.forEach(span => {
-      const svc = span.ServiceName || 'unknown-service';
-      if (!nodes.has(svc)) {
-        nodes.set(svc, { id: svc, label: svc, x: 400, y: 250 + (nodes.size * 50 - 100), color: '#a855f7' });
+
+    const currentNodesMap = new Map(graphNodes.map(n => [n.id, n]));
+    graphNodes = data.nodes.map((node, index) => {
+      const existing = currentNodesMap.get(node.id);
+      if (existing) {
+        return { ...node, x: existing.x, y: existing.y };
       }
-      
-      if (span.Name.includes('PUT') || span.Name.includes('GET')) {
-        const dest = 'ServStore';
-        if (!nodes.has(dest)) {
-          nodes.set(dest, { id: dest, label: 'ServStore (Storage)', x: 650, y: 150, color: '#10b981' });
-        }
-        const edgeKey = `${svc}->${dest}`;
-        if (!edgeSet.has(edgeKey)) {
-          edgeSet.add(edgeKey);
-          edges.push({ from: svc, to: dest, label: span.Name.split(' ')[0] });
-        }
+      let x = 400;
+      let y = 250;
+      if (node.id === 'ServGate') { x = 150; y = 250; }
+      else if (node.id === 'ServStore') { x = 650; y = 150; }
+      else if (node.id === 'ServQueue') { x = 650; y = 350; }
+      else {
+        x = 400;
+        y = 150 + (index * 90);
       }
-      
-      if (span.Name.includes('publish') || span.Name.includes('subscribe')) {
-        const dest = 'ServQueue';
-        if (!nodes.has(dest)) {
-          nodes.set(dest, { id: dest, label: 'ServQueue (Broker)', x: 650, y: 350, color: '#f59e0b' });
-        }
-        const edgeKey = `${svc}->${dest}`;
-        if (!edgeSet.has(edgeKey)) {
-          edgeSet.add(edgeKey);
-          edges.push({ from: svc, to: dest, label: 'STOMP' });
-        }
-      }
+      return { ...node, x, y };
     });
-    
-    nodes.forEach(node => {
-      if (node.id !== 'ServGate' && node.id !== 'ServStore' && node.id !== 'ServQueue') {
-        const edgeKey = `ServGate->${node.id}`;
-        if (!edgeSet.has(edgeKey)) {
-          edgeSet.add(edgeKey);
-          edges.push({ from: 'ServGate', to: node.id, label: 'HTTP' });
-        }
-      }
-    });
-    
-    drawTopology(ctx, canvas, Array.from(nodes.values()), edges);
+
+    graphEdges = data.edges || [];
+    startGraphRenderLoop(ctx, canvas);
   } catch (err) {
-    drawMockDependencyGraph(ctx, canvas);
+    loadMockGraphData();
+    startGraphRenderLoop(ctx, canvas);
   }
 }
 
-function drawTopology(ctx, canvas, nodes, edges) {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+function loadMockGraphData() {
+  graphNodes = [
+    { id: 'ServGate', label: 'ServGate', x: 150, y: 250, color: '#06b6d4' },
+    { id: 'OrderService', label: 'OrderService', x: 400, y: 150, color: '#a855f7' },
+    { id: 'BillingService', label: 'BillingService', x: 400, y: 350, color: '#a855f7' },
+    { id: 'ServStore', label: 'ServStore', x: 650, y: 150, color: '#10b981' },
+    { id: 'ServQueue', label: 'ServQueue', x: 650, y: 350, color: '#f59e0b' }
+  ];
   
-  edges.forEach(edge => {
-    const fromNode = nodes.find(n => n.id === edge.from);
-    const toNode = nodes.find(n => n.id === edge.to);
-    if (fromNode && toNode) {
-      drawArrow(ctx, fromNode.x, fromNode.y, toNode.x, toNode.y, '#475569', edge.label);
-    }
-  });
+  graphEdges = [
+    { from: 'ServGate', to: 'OrderService', label: 'HTTP' },
+    { from: 'ServGate', to: 'BillingService', label: 'HTTP' },
+    { from: 'OrderService', to: 'ServStore', label: 'PUT' },
+    { from: 'BillingService', to: 'ServQueue', label: 'STOMP' }
+  ];
+}
+
+function startGraphRenderLoop(ctx, canvas) {
+  if (graphAnimationId) {
+    cancelAnimationFrame(graphAnimationId);
+  }
   
-  nodes.forEach(node => {
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, 45, 0, 2 * Math.PI);
-    ctx.fillStyle = 'rgba(15, 17, 32, 0.85)';
-    ctx.strokeStyle = node.color;
-    ctx.lineWidth = 3;
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = node.color;
-    ctx.fill();
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+  flowParticles = [];
+  
+  function updateAndDraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    ctx.font = 'bold 12px Outfit';
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.fillText(node.id, node.x, node.y + 4);
-  });
+    // Draw connection edges
+    graphEdges.forEach(edge => {
+      const fromNode = graphNodes.find(n => n.id === edge.from);
+      const toNode = graphNodes.find(n => n.id === edge.to);
+      if (fromNode && toNode) {
+        drawArrow(ctx, fromNode.x, fromNode.y, toNode.x, toNode.y, '#475569', edge.label);
+      }
+    });
+    
+    // Periodically spawn particles on random edges
+    if (Math.random() < 0.03 && graphEdges.length > 0) {
+      const randomEdge = graphEdges[Math.floor(Math.random() * graphEdges.length)];
+      flowParticles.push({
+        edge: randomEdge,
+        progress: 0.0,
+        speed: 0.01 + Math.random() * 0.015
+      });
+    }
+    
+    // Update and draw flow particles
+    flowParticles.forEach((p, idx) => {
+      p.progress += p.speed;
+      if (p.progress >= 1.0) {
+        flowParticles.splice(idx, 1);
+        return;
+      }
+      
+      const fromNode = graphNodes.find(n => n.id === p.edge.from);
+      const toNode = graphNodes.find(n => n.id === p.edge.to);
+      if (fromNode && toNode) {
+        const angle = Math.atan2(toNode.y - fromNode.y, toNode.x - fromNode.x);
+        const startX = fromNode.x + 45 * Math.cos(angle);
+        const startY = fromNode.y + 45 * Math.sin(angle);
+        const endX = toNode.x - 45 * Math.cos(angle);
+        const endY = toNode.y - 45 * Math.sin(angle);
+        
+        const px = startX + (endX - startX) * p.progress;
+        const py = startY + (endY - startY) * p.progress;
+        
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = '#6366f1';
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = '#6366f1';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    });
+    
+    // Draw nodes
+    graphNodes.forEach(node => {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, 45, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(15, 17, 32, 0.85)';
+      ctx.strokeStyle = node.color;
+      ctx.lineWidth = selectedNode === node ? 5 : 3;
+      ctx.shadowBlur = selectedNode === node ? 18 : 10;
+      ctx.shadowColor = node.color;
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      
+      ctx.font = 'bold 12px Outfit';
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.fillText(node.id, node.x, node.y + 4);
+    });
+    
+    graphAnimationId = requestAnimationFrame(updateAndDraw);
+  }
+  
+  updateAndDraw();
 }
 
 function drawArrow(ctx, fromX, fromY, toX, toY, color, label) {
@@ -1586,25 +1674,6 @@ function drawArrow(ctx, fromX, fromY, toX, toY, color, label) {
     ctx.textAlign = 'center';
     ctx.fillText(label, midX, midY - 8);
   }
-}
-
-function drawMockDependencyGraph(ctx, canvas) {
-  const nodes = [
-    { id: 'ServGate', label: 'ServGate', x: 150, y: 250, color: '#06b6d4' },
-    { id: 'OrderService', label: 'OrderService', x: 400, y: 150, color: '#a855f7' },
-    { id: 'BillingService', label: 'BillingService', x: 400, y: 350, color: '#a855f7' },
-    { id: 'ServStore', label: 'ServStore', x: 650, y: 150, color: '#10b981' },
-    { id: 'ServQueue', label: 'ServQueue', x: 650, y: 350, color: '#f59e0b' }
-  ];
-  
-  const edges = [
-    { from: 'ServGate', to: 'OrderService', label: 'HTTP' },
-    { from: 'ServGate', to: 'BillingService', label: 'HTTP' },
-    { from: 'OrderService', to: 'ServStore', label: 'PUT' },
-    { from: 'BillingService', to: 'ServQueue', label: 'STOMP' }
-  ];
-  
-  drawTopology(ctx, canvas, nodes, edges);
 }
 
 // --- Access Control / Policy Editor Logic ---

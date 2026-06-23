@@ -205,6 +205,7 @@ func main() {
 	mux.HandleFunc("/api/audit-logs", authorizeConsole(handleGetAuditLogs))
 	mux.HandleFunc("/api/db/query", authorizeConsole(handleDbQuery))
 	mux.HandleFunc("/api/db/migrations", authorizeConsole(handleMigrations))
+	mux.HandleFunc("/api/topology", authorizeConsole(handleTopology))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -348,9 +349,10 @@ func checkStatus(name string, baseUrl string, healthPath string) ComponentStatus
 	}
 
 	// Propagate default credentials for internal check
-	if name == "ServGate" {
+	switch name {
+	case "ServGate":
 		req.Header.Set("Authorization", "Bearer "+*authToken)
-	} else if name == "ServQueue" {
+	case "ServQueue":
 		req.Header.Set("Authorization", "Bearer secret-token")
 	}
 
@@ -1025,9 +1027,7 @@ func handleDbQuery(w http.ResponseWriter, r *http.Request) {
 	case "sqlite", "sqlite3":
 		driver = "sqlite"
 		// convert sqlite:// prefix if present
-		if strings.HasPrefix(connStr, "sqlite://") {
-			connStr = strings.TrimPrefix(connStr, "sqlite://")
-		}
+		connStr = strings.TrimPrefix(connStr, "sqlite://")
 	case "postgres", "postgresql":
 		driver = "postgres"
 	case "mysql":
@@ -1354,7 +1354,7 @@ func handleMigrations(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func handleGetMigrations(w http.ResponseWriter, r *http.Request) {
+func handleGetMigrations(w http.ResponseWriter, _ *http.Request) {
 	migrationsMu.Lock()
 	defer migrationsMu.Unlock()
 
@@ -1387,9 +1387,7 @@ func handleApplyMigration(w http.ResponseWriter, r *http.Request) {
 	switch driver {
 	case "sqlite", "sqlite3":
 		driver = "sqlite"
-		if strings.HasPrefix(dsn, "sqlite://") {
-			dsn = strings.TrimPrefix(dsn, "sqlite://")
-		}
+		dsn = strings.TrimPrefix(dsn, "sqlite://")
 	case "postgres", "postgresql":
 		driver = "postgres"
 	case "mysql":
@@ -1473,5 +1471,164 @@ func persistMigration(entry MigrationEntry, user string) {
 		status = 500
 	}
 	addAuditLog(user, fmt.Sprintf("Migration %s: %s (rev %s)", entry.Status, entry.Description, entry.Revision), "POST", "/api/db/migrations", status)
+}
+
+type TopologyNode struct {
+	ID        string  `json:"id"`
+	Label     string  `json:"label"`
+	Color     string  `json:"color"`
+	Online    bool    `json:"online"`
+	LatencyMs int64   `json:"latency_ms"`
+	ErrorRate float64 `json:"error_rate"`
+}
+
+type TopologyEdge struct {
+	From      string  `json:"from"`
+	To        string  `json:"to"`
+	Label     string  `json:"label"`
+	LatencyMs int64   `json:"latency_ms"`
+	ErrorRate float64 `json:"error_rate"`
+}
+
+type TopologyResponse struct {
+	Nodes []TopologyNode `json:"nodes"`
+	Edges []TopologyEdge `json:"edges"`
+}
+
+func handleTopology(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(strings.TrimSuffix(*storeUrl, "/") + "/console/traces")
+	if err != nil {
+		json.NewEncoder(w).Encode(TopologyResponse{Nodes: []TopologyNode{}, Edges: []TopologyEdge{}})
+		return
+	}
+	defer resp.Body.Close()
+
+	type rawSpan struct {
+		Name         string    `json:"Name"`
+		TraceID      string    `json:"TraceID"`
+		SpanID       string    `json:"SpanID"`
+		ParentSpanID string    `json:"ParentSpanID"`
+		ServiceName  string    `json:"ServiceName"`
+		DurationNs   int64     `json:"DurationNs"`
+		StatusCode   string    `json:"StatusCode"`
+		StartTime    time.Time `json:"StartTime"`
+	}
+
+	var spans []rawSpan
+	if err := json.NewDecoder(resp.Body).Decode(&spans); err != nil {
+		json.NewEncoder(w).Encode(TopologyResponse{Nodes: []TopologyNode{}, Edges: []TopologyEdge{}})
+		return
+	}
+
+	nodesMap := make(map[string]*TopologyNode)
+	edgesMap := make(map[string]*TopologyEdge)
+
+	nodesMap["ServGate"] = &TopologyNode{ID: "ServGate", Label: "ServGate (Gateway)", Color: "#06b6d4", Online: true}
+	nodesMap["ServStore"] = &TopologyNode{ID: "ServStore", Label: "ServStore (Storage)", Color: "#10b981", Online: true}
+	nodesMap["ServQueue"] = &TopologyNode{ID: "ServQueue", Label: "ServQueue (Broker)", Color: "#f59e0b", Online: true}
+
+	spanToService := make(map[string]string)
+	for _, span := range spans {
+		svc := span.ServiceName
+		if svc == "" {
+			svc = "unknown-service"
+		}
+		spanToService[span.SpanID] = svc
+
+		if _, exists := nodesMap[svc]; !exists {
+			nodesMap[svc] = &TopologyNode{
+				ID:    svc,
+				Label: svc,
+				Color: "#a855f7",
+				Online: true,
+			}
+		}
+	}
+
+	for _, span := range spans {
+		svc := span.ServiceName
+		if svc == "" {
+			svc = "unknown-service"
+		}
+
+		isErr := span.StatusCode == "error"
+		latMs := span.DurationNs / 1e6
+
+		nodesMap[svc].LatencyMs = (nodesMap[svc].LatencyMs + latMs) / 2
+		if isErr {
+			nodesMap[svc].ErrorRate = 0.1
+		}
+
+		if span.ParentSpanID != "" {
+			if parentSvc, parentExists := spanToService[span.ParentSpanID]; parentExists && parentSvc != svc {
+				edgeKey := fmt.Sprintf("%s->%s", parentSvc, svc)
+				if _, exists := edgesMap[edgeKey]; !exists {
+					edgesMap[edgeKey] = &TopologyEdge{
+						From:      parentSvc,
+						To:        svc,
+						Label:     "Call",
+						LatencyMs: latMs,
+					}
+				} else {
+					edgesMap[edgeKey].LatencyMs = (edgesMap[edgeKey].LatencyMs + latMs) / 2
+				}
+				if isErr {
+					edgesMap[edgeKey].ErrorRate = 0.2
+				}
+			}
+		}
+
+		if strings.Contains(span.Name, "PUT") || strings.Contains(span.Name, "GET") {
+			edgeKey := fmt.Sprintf("%s->ServStore", svc)
+			if _, exists := edgesMap[edgeKey]; !exists {
+				edgesMap[edgeKey] = &TopologyEdge{
+					From:      svc,
+					To:        "ServStore",
+					Label:     "S3",
+					LatencyMs: latMs,
+				}
+			}
+		}
+		if strings.Contains(span.Name, "publish") || strings.Contains(span.Name, "subscribe") {
+			edgeKey := fmt.Sprintf("%s->ServQueue", svc)
+			if _, exists := edgesMap[edgeKey]; !exists {
+				edgesMap[edgeKey] = &TopologyEdge{
+					From:      svc,
+					To:        "ServQueue",
+					Label:     "STOMP",
+					LatencyMs: latMs,
+				}
+			}
+		}
+	}
+
+	var nodes []TopologyNode
+	for _, n := range nodesMap {
+		nodes = append(nodes, *n)
+	}
+
+	var edges []TopologyEdge
+	for _, e := range edgesMap {
+		edges = append(edges, *e)
+	}
+
+	for _, n := range nodes {
+		if n.ID != "ServGate" && n.ID != "ServStore" && n.ID != "ServQueue" {
+			edgeKey := fmt.Sprintf("ServGate->%s", n.ID)
+			if _, exists := edgesMap[edgeKey]; !exists {
+				edges = append(edges, TopologyEdge{
+					From:      "ServGate",
+					To:        n.ID,
+					Label:     "HTTP",
+					LatencyMs: 10,
+				})
+			}
+		}
+	}
+
+	json.NewEncoder(w).Encode(TopologyResponse{Nodes: nodes, Edges: edges})
 }
 
