@@ -153,10 +153,12 @@ func TestHandleStatusHealthz(t *testing.T) {
 	oldGate := *gateUrl
 	oldStore := *storeUrl
 	oldQueue := *queueUrl
+	oldTunnel := *tunnelUrl
 	defer func() {
 		*gateUrl = oldGate
 		*storeUrl = oldStore
 		*queueUrl = oldQueue
+		*tunnelUrl = oldTunnel
 	}()
 
 	mockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,6 +174,7 @@ func TestHandleStatusHealthz(t *testing.T) {
 	*gateUrl = mockSrv.URL
 	*storeUrl = mockSrv.URL
 	*queueUrl = mockSrv.URL
+	*tunnelUrl = mockSrv.URL
 
 	req := httptest.NewRequest("GET", "/api/status", nil)
 	w := httptest.NewRecorder()
@@ -192,8 +195,8 @@ func TestHandleStatusHealthz(t *testing.T) {
 		t.Fatal("expected components list in response")
 	}
 
-	if len(components) != 3 {
-		t.Fatalf("expected 3 components, got %d", len(components))
+	if len(components) != 4 {
+		t.Fatalf("expected 4 components, got %d", len(components))
 	}
 
 	for _, c := range components {
