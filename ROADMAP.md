@@ -51,7 +51,7 @@ This document outlines the design phases, completed modules, and upcoming featur
 | 6.3 | **Graceful shutdown on SIGTERM** | Small | Drain active WebSocket connections and flush state cleanly on shutdown. | [x] |
 | 6.4 | **Unified health aggregation dashboard** | Medium | Poll `/healthz` on all connected services and display a single "ecosystem health" traffic-light panel. | [x] |
 | 6.5 | **CI/CD pipeline (GitHub Actions)** | Small | Automated build, test, and format checks on every PR. Currently missing. | [x] |
-| 6.6 | **RBAC on console access** | Medium | Restrict which dashboard panels/actions are available based on user role (viewer vs operator vs admin). | [ ] |
+| 6.6 | **RBAC on console access** | Medium | Restrict which dashboard panels/actions are available based on user role (viewer vs operator vs admin). | [x] |
 | 6.7 | **Dark/light theme toggle** | Small | Currently glassmorphic dark only — add light mode for accessibility and preference. | [x] |
 | 6.8 | **Cross-service request replay** | Large | Select an OTel trace, click "Replay" to re-issue the original request through ServGate — useful for debugging. | [ ] |
 

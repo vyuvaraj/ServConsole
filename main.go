@@ -225,11 +225,12 @@ func main() {
 	mux.HandleFunc("/api/auth/login", handleLogin)
 	mux.HandleFunc("/api/auth/callback", handleCallback)
 	mux.HandleFunc("/api/auth/logout", handleLogout)
+	mux.HandleFunc("/api/auth/me", authorizeConsole(handleAuthMe))
 
 	// 3. Proxies
-	mux.Handle("/api/proxy/gate/", authorizeConsole(gateProxy.ServeHTTP))
-	mux.Handle("/api/proxy/store/", authorizeConsole(storeProxy.ServeHTTP))
-	mux.Handle("/api/proxy/queue/", authorizeConsole(queueProxy.ServeHTTP))
+	mux.Handle("/api/proxy/gate/", authorizeConsole(checkProxyRBAC(gateProxy.ServeHTTP)))
+	mux.Handle("/api/proxy/store/", authorizeConsole(checkProxyRBAC(storeProxy.ServeHTTP)))
+	mux.Handle("/api/proxy/queue/", authorizeConsole(checkProxyRBAC(queueProxy.ServeHTTP)))
 	mux.Handle("/api/proxy/trace/", authorizeConsole(traceProxy.ServeHTTP))
 
 	fileServer := http.FileServer(http.Dir("./web"))
@@ -432,6 +433,13 @@ func checkStatus(name string, baseUrl string) ComponentStatus {
 }
 
 func handleRoutes(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost || r.Method == http.MethodDelete {
+		if getUserRole(r) != "admin" {
+			WriteJSONError(w, r, "Forbidden: Admin role required to modify routes", "ERR_FORBIDDEN", http.StatusForbidden)
+			return
+		}
+	}
+
 	configMu.Lock()
 	defer configMu.Unlock()
 
@@ -641,6 +649,11 @@ func handleRebalance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	role := getUserRole(r)
+	if role != "admin" && role != "operator" {
+		http.Error(w, "Forbidden: Admin or Operator role required to trigger cluster rebalance", http.StatusForbidden)
+		return
+	}
 	client := http.Client{Timeout: 3 * time.Second}
 	body := strings.NewReader(`{"source_node":{"node_id":"servconsole","address":"localhost:8083","status":"online"},"peers":{}}`)
 	req, err := http.NewRequest("POST",
@@ -721,21 +734,22 @@ func authorizeConsole(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		username, ok := validateJWT(token, jwtSecBytes)
+		username, role, ok := validateJWT(token, jwtSecBytes)
 		if !ok {
 			http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
 			return
 		}
 
 		r.Header.Set("X-Console-User", username)
+		r.Header.Set("X-Console-Role", role)
 		next(w, r)
 	}
 }
 
-func validateJWT(tokenStr string, secret []byte) (string, bool) {
+func validateJWT(tokenStr string, secret []byte) (string, string, bool) {
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 3 {
-		return "", false
+		return "", "", false
 	}
 
 	headerPart, payloadPart, signaturePart := parts[0], parts[1], parts[2]
@@ -748,29 +762,41 @@ func validateJWT(tokenStr string, secret []byte) (string, bool) {
 	// Base64Url decode signaturePart
 	sigBytes, err := base64UrlDecode(signaturePart)
 	if err != nil || !hmac.Equal(sigBytes, expectedMac) {
-		return "", false
+		return "", "", false
 	}
 
 	// Base64Url decode payloadPart and extract username, exp
 	payloadBytes, err := base64UrlDecode(payloadPart)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 
 	var claims struct {
 		Username string `json:"username"`
+		Role     string `json:"role"`
 		Exp      int64  `json:"exp"`
 	}
 	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
-		return "", false
+		return "", "", false
 	}
 
 	// Check expiration
 	if claims.Exp > 0 && time.Now().Unix() > claims.Exp {
-		return "", false
+		return "", "", false
 	}
 
-	return claims.Username, true
+	role := claims.Role
+	if role == "" {
+		if claims.Username == "admin" {
+			role = "admin"
+		} else if claims.Username == "operator" || claims.Username == "developer-bob" {
+			role = "operator"
+		} else {
+			role = "viewer"
+		}
+	}
+
+	return claims.Username, role, true
 }
 
 func base64UrlDecode(s string) ([]byte, error) {
@@ -834,8 +860,14 @@ func initOIDC() {
 }
 
 func generateLocalJWT(username string) (string, error) {
+	role := "viewer"
+	if username == "admin" {
+		role = "admin"
+	} else if username == "operator" || username == "developer-bob" {
+		role = "operator"
+	}
 	header := base64UrlEncode([]byte(`{"alg":"HS256","typ":"JWT"}`))
-	payload := base64UrlEncode([]byte(fmt.Sprintf(`{"username":%q,"exp":%d}`, username, time.Now().Add(24*time.Hour).Unix())))
+	payload := base64UrlEncode([]byte(fmt.Sprintf(`{"username":%q,"exp":%d,"role":%q}`, username, time.Now().Add(24*time.Hour).Unix(), role)))
 	
 	mac := hmac.New(sha256.New, jwtSecBytes)
 	mac.Write([]byte(header + "." + payload))
@@ -1453,6 +1485,11 @@ func handleGetMigrations(w http.ResponseWriter, _ *http.Request) {
 }
 
 func handleApplyMigration(w http.ResponseWriter, r *http.Request) {
+	if getUserRole(r) != "admin" {
+		WriteJSONError(w, r, "Forbidden: Admin role required to apply migrations", "ERR_FORBIDDEN", http.StatusForbidden)
+		return
+	}
+
 	var req struct {
 		Driver      string `json:"driver"`
 		DSN         string `json:"dsn"`
@@ -1720,5 +1757,64 @@ func handleTopology(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(TopologyResponse{Nodes: nodes, Edges: edges})
+}
+
+func getUserRole(r *http.Request) string {
+	jwtSec := os.Getenv("SERV_JWT_SECRET")
+	if jwtSec == "" && oidcIssuer == "" {
+		return "admin"
+	}
+	role := r.Header.Get("X-Console-Role")
+	if role == "" {
+		return "viewer"
+	}
+	return role
+}
+
+func handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	username := r.Header.Get("X-Console-User")
+	role := getUserRole(r)
+	if username == "" {
+		username = "anonymous"
+	}
+	json.NewEncoder(w).Encode(map[string]string{
+		"username": username,
+		"role":     role,
+	})
+}
+
+func checkProxyRBAC(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		role := getUserRole(r)
+		path := r.URL.Path
+		method := r.Method
+
+		// 1. Policy edits, WASM uploads, and attach transforms (Admin only)
+		isAdminRoute := (strings.HasPrefix(path, "/api/proxy/gate/api/admin/middleware/") && method != "GET") ||
+			(strings.HasPrefix(path, "/api/proxy/store/console/users/") && strings.HasSuffix(path, "/policy") && method != "GET") ||
+			(strings.HasPrefix(path, "/api/proxy/queue/api/topics/") && strings.HasSuffix(path, "/transform") && method != "GET")
+
+		if isAdminRoute {
+			if role != "admin" {
+				WriteJSONError(w, r, "Forbidden: Admin role required for this administrative operation", "ERR_FORBIDDEN", http.StatusForbidden)
+				return
+			}
+		}
+
+		// 2. Queue publishes, DLQ config, and bucket write/delete (Admin or Operator only)
+		isOperatorRoute := (strings.HasPrefix(path, "/api/proxy/queue/api/publish") && method == "POST") ||
+			(strings.HasPrefix(path, "/api/proxy/queue/api/topics/") && strings.HasSuffix(path, "/dlq") && method == "POST") ||
+			(strings.HasPrefix(path, "/api/proxy/store/") && (method == "PUT" || method == "POST" || method == "DELETE") && !strings.Contains(path, "/policy"))
+
+		if isOperatorRoute {
+			if role != "admin" && role != "operator" {
+				WriteJSONError(w, r, "Forbidden: Admin or Operator role required for this write operation", "ERR_FORBIDDEN", http.StatusForbidden)
+				return
+			}
+		}
+
+		next(w, r)
+	}
 }
 

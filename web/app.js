@@ -206,6 +206,8 @@ async function refreshRoutesList() {
       return;
     }
     
+    const role = STATE.user?.role || 'admin';
+    const disabledAttr = role === 'admin' ? '' : 'disabled style="opacity:0.5; cursor:not-allowed;" title="Admin privilege required"';
     routes.forEach(route => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
@@ -216,7 +218,7 @@ async function refreshRoutesList() {
         <td>${route.semantic_cache ? '✅ Active' : '—'}</td>
         <td>${route.pii_redact ? '✅ Active' : '—'}</td>
         <td>
-          <button class="btn btn-danger btn-sm" onclick="deleteRoute('${route.prefix}')">Delete</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteRoute('${route.prefix}')" ${disabledAttr}>Delete</button>
         </td>
       `;
       tbody.appendChild(tr);
@@ -239,6 +241,8 @@ function refreshQueuesList() {
   
   // Render STOMP / general queue stats
   const metrics = queue.details.metrics || {};
+  const role = STATE.user?.role || 'admin';
+  const adminDisabled = role === 'admin' ? '' : 'disabled style="opacity:0.5; cursor:not-allowed;" title="Admin privilege required"';
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td><strong>stomp://localhost:61613</strong> (Default STOMP)</td>
@@ -248,7 +252,7 @@ function refreshQueuesList() {
       WASM Execs: ${metrics.wasm_executions_total || 0}
     </td>
     <td>
-      <button class="btn btn-secondary btn-sm" onclick="clearWasmTransform('default')">Reset Filters</button>
+      <button class="btn btn-secondary btn-sm" onclick="clearWasmTransform('default')" ${adminDisabled}>Reset Filters</button>
     </td>
   `;
   tbody.appendChild(tr);
@@ -276,6 +280,12 @@ async function fetchTopicAdmin() {
     }
 
     tbody.innerHTML = '';
+    const role = STATE.user?.role || 'admin';
+    const isOp = role === 'admin' || role === 'operator';
+    const isAdmin = role === 'admin';
+    const opDisabled = isOp ? '' : 'disabled style="opacity:0.5; cursor:not-allowed;" title="Operator privilege required"';
+    const adminDisabled = isAdmin ? '' : 'disabled style="opacity:0.5; cursor:not-allowed;" title="Admin privilege required"';
+
     topics.forEach(topic => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
@@ -285,8 +295,8 @@ async function fetchTopicAdmin() {
         <td>${topic.has_transform ? '<span class="badge online">Active</span>' : '<span class="text-muted">None</span>'}</td>
         <td>${topic.dlq_topic ? `<span class="badge">${topic.dlq_topic}</span>` : '<span class="text-muted">—</span>'}</td>
         <td>
-          <button class="btn btn-secondary btn-sm" onclick="configureDLQ('${topic.name}')">DLQ</button>
-          <button class="btn btn-secondary btn-sm" onclick="clearWasmTransform('${topic.name}')">Clear WASM</button>
+          <button class="btn btn-secondary btn-sm" onclick="configureDLQ('${topic.name}')" ${opDisabled}>DLQ</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearWasmTransform('${topic.name}')" ${adminDisabled}>Clear WASM</button>
         </td>
       `;
       tbody.appendChild(tr);
@@ -963,19 +973,38 @@ async function checkAuthConfig() {
     const config = await res.json();
     SSO_ENABLED = config.sso_enabled;
     
-    if (SSO_ENABLED) {
-      // Check current user name from cookies (stored in client profile status / info endpoint)
-      // For local simplicity, we query a simple check endpoint or extract from headers
-      const statusRes = await fetch('/api/status');
-      if (statusRes.status === 401) {
+    // Fetch user and role from backend
+    const meRes = await fetch('/api/auth/me');
+    if (meRes.status === 401) {
+      showLoginScreen();
+      return;
+    }
+    if (meRes.ok) {
+      const meData = await meRes.json();
+      STATE.user = meData;
+      displayUserProfile(meData.username, meData.role);
+      applyRBACRules(meData.role);
+    } else {
+      // Fallback: decode cookie
+      const decoded = getDecodedToken();
+      if (decoded) {
+        STATE.user = decoded;
+        displayUserProfile(decoded.username, decoded.role);
+        applyRBACRules(decoded.role);
+      } else if (SSO_ENABLED) {
         showLoginScreen();
       } else {
-        const username = getCookieUsername();
-        displayUserProfile(username || "SSO User");
+        STATE.user = { username: 'anonymous', role: 'admin' };
+        displayUserProfile('anonymous', 'admin');
+        applyRBACRules('admin');
       }
     }
   } catch (err) {
     console.error("Auth config check failed:", err);
+    // If auth is not configured at all, default to admin
+    STATE.user = { username: 'anonymous', role: 'admin' };
+    displayUserProfile('anonymous', 'admin');
+    applyRBACRules('admin');
   }
 }
 
@@ -989,25 +1018,80 @@ function showLoginScreen() {
   }
 }
 
-function displayUserProfile(username) {
+function displayUserProfile(username, role) {
   const profileSection = document.getElementById('user-profile-section');
   const userText = document.getElementById('logged-in-username');
   if (profileSection && userText) {
-    userText.textContent = username;
+    userText.textContent = `${username} (${role.toUpperCase()})`;
     profileSection.style.display = 'flex';
   }
 }
 
-function getCookieUsername() {
+function getDecodedToken() {
   const cookie = document.cookie.split('; ').find(row => row.startsWith('token='));
   if (!cookie) return null;
   const token = cookie.split('=')[1];
   try {
     const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload.username;
+    return {
+      username: payload.username,
+      role: payload.role || (payload.username === 'admin' ? 'admin' : (payload.username === 'operator' ? 'operator' : 'viewer'))
+    };
   } catch (e) {
     return null;
   }
+}
+
+function applyRBACRules(role) {
+  const isAdmin = role === 'admin';
+  const isOperator = role === 'operator' || isAdmin;
+  
+  // 1. Admin-only UI Controls
+  const adminSelectors = [
+    '#btn-add-route',
+    '#wasm-upload-form button[type="submit"]',
+    '#queue-transform-form button[type="submit"]',
+    '#btn-apply-migration',
+    '#btn-save-policy',
+    '#btn-delete-policy'
+  ];
+  
+  // 2. Operator/Admin UI Controls
+  const operatorSelectors = [
+    '#btn-create-bucket',
+    '#publish-message-form button[type="submit"]',
+    '#btn-trigger-rebalance'
+  ];
+
+  adminSelectors.forEach(sel => {
+    document.querySelectorAll(sel).forEach(el => {
+      el.disabled = !isAdmin;
+      if (!isAdmin) {
+        el.title = "Admin privilege required";
+        el.style.opacity = '0.5';
+        el.style.cursor = 'not-allowed';
+      } else {
+        el.title = "";
+        el.style.opacity = '';
+        el.style.cursor = '';
+      }
+    });
+  });
+
+  operatorSelectors.forEach(sel => {
+    document.querySelectorAll(sel).forEach(el => {
+      el.disabled = !isOperator;
+      if (!isOperator) {
+        el.title = "Operator/Admin privilege required";
+        el.style.opacity = '0.5';
+        el.style.cursor = 'not-allowed';
+      } else {
+        el.title = "";
+        el.style.opacity = '';
+        el.style.cursor = '';
+      }
+    });
+  });
 }
 
 async function fetchAuditLogs() {
@@ -2101,8 +2185,9 @@ async function selectUserPolicy(username) {
       const data = await res.json();
       jsonArea.value = JSON.stringify(data, null, 2);
     }
-    if (btnSave) btnSave.disabled = false;
-    if (btnDelete) btnDelete.disabled = false;
+    const isAdmin = STATE.user?.role === 'admin';
+    if (btnSave) btnSave.disabled = !isAdmin;
+    if (btnDelete) btnDelete.disabled = !isAdmin;
   } catch (err) {
     if (jsonArea) jsonArea.value = "Error: " + err.message;
   }
