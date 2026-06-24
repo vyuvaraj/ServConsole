@@ -35,6 +35,7 @@ var (
 	storeUrl   = flag.String("store-url", "http://localhost:8081", "ServStore base URL")
 	queueUrl   = flag.String("queue-url", "http://localhost:8082", "ServQueue base URL")
 	traceUrl   = flag.String("trace-url", "http://localhost:8090", "ServTrace base URL")
+	tunnelUrl  = flag.String("tunnel-url", "http://localhost:8443", "ServTunnel base URL")
 	authToken  = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
 	gateConfig = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
 )
@@ -47,6 +48,7 @@ type ServDiscovery struct {
 	Store        string `json:"store"`         // ServStore base URL
 	Queue        string `json:"queue"`         // ServQueue base URL
 	Trace        string `json:"trace"`         // ServTrace base URL
+	Tunnel       string `json:"tunnel"`        // ServTunnel base URL
 	ConsolePort  int    `json:"console_port"` // Override listen port
 	JWTSecret    string `json:"jwt_secret"`   // Shared JWT signing secret
 	OTLPEndpoint string `json:"otlp_endpoint"` // Shared OpenTelemetry collector
@@ -65,6 +67,7 @@ func loadDiscovery() ServDiscovery {
 		Store:        *storeUrl,
 		Queue:        *queueUrl,
 		Trace:        *traceUrl,
+		Tunnel:       *tunnelUrl,
 		ConsolePort:  *port,
 		AuthToken:    *authToken,
 		GateConfig:   *gateConfig,
@@ -106,6 +109,7 @@ func loadDiscovery() ServDiscovery {
 	if manifest.OTLPEndpoint != "" { d.OTLPEndpoint = manifest.OTLPEndpoint }
 	if manifest.GateConfig != "" { d.GateConfig = manifest.GateConfig }
 	if manifest.Trace != "" { d.Trace = manifest.Trace }
+	if manifest.Tunnel != "" { d.Tunnel = manifest.Tunnel }
 
 	return d
 }
@@ -154,6 +158,7 @@ func main() {
 	*storeUrl   = activeDiscovery.Store
 	*queueUrl   = activeDiscovery.Queue
 	*traceUrl   = activeDiscovery.Trace
+	*tunnelUrl  = activeDiscovery.Tunnel
 	*port       = activeDiscovery.ConsolePort
 	*authToken  = activeDiscovery.AuthToken
 	*gateConfig = activeDiscovery.GateConfig
@@ -162,6 +167,7 @@ func main() {
 	log.Printf("[discovery] ServStore → %s", *storeUrl)
 	log.Printf("[discovery] ServQueue → %s", *queueUrl)
 	log.Printf("[discovery] ServTrace → %s", *traceUrl)
+	log.Printf("[discovery] ServTunnel → %s", *tunnelUrl)
 	if activeDiscovery.OTLPEndpoint != "" {
 		log.Printf("[discovery] OTLP      → %s", activeDiscovery.OTLPEndpoint)
 	}
@@ -189,18 +195,24 @@ func main() {
 	if err != nil {
 		log.Fatalf("Invalid trace-url: %v", err)
 	}
+	tunURL, err := url.Parse(*tunnelUrl)
+	if err != nil {
+		log.Fatalf("Invalid tunnel-url: %v", err)
+	}
 
 	// Create reverse proxies
 	gateProxy := httputil.NewSingleHostReverseProxy(gURL)
 	storeProxy := httputil.NewSingleHostReverseProxy(sURL)
 	queueProxy := httputil.NewSingleHostReverseProxy(qURL)
 	traceProxy := httputil.NewSingleHostReverseProxy(tURL)
+	tunnelProxy := httputil.NewSingleHostReverseProxy(tunURL)
 
 	// Adjust Director to rewrite request path and set Authorization headers
 	configureProxyDirector(gateProxy, gURL, "/api/proxy/gate", *authToken)
 	configureProxyDirector(storeProxy, sURL, "/api/proxy/store", "")
 	configureProxyDirector(queueProxy, qURL, "/api/proxy/queue", "secret-token")
 	configureProxyDirector(traceProxy, tURL, "/api/proxy/trace", "")
+	configureProxyDirector(tunnelProxy, tunURL, "/api/proxy/tunnel", "")
 
 	mux := http.NewServeMux()
 
@@ -232,6 +244,7 @@ func main() {
 	mux.Handle("/api/proxy/store/", authorizeConsole(checkProxyRBAC(storeProxy.ServeHTTP)))
 	mux.Handle("/api/proxy/queue/", authorizeConsole(checkProxyRBAC(queueProxy.ServeHTTP)))
 	mux.Handle("/api/proxy/trace/", authorizeConsole(traceProxy.ServeHTTP))
+	mux.Handle("/api/proxy/tunnel/", authorizeConsole(tunnelProxy.ServeHTTP))
 
 	fileServer := http.FileServer(http.Dir("./web"))
 	mux.Handle("/", fileServer)
@@ -344,6 +357,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		checkStatus("ServGate", *gateUrl),
 		checkStatus("ServStore", *storeUrl),
 		checkStatus("ServQueue", *queueUrl),
+		checkStatus("ServTunnel", *tunnelUrl),
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{
@@ -1656,6 +1670,7 @@ func handleTopology(w http.ResponseWriter, r *http.Request) {
 	nodesMap["ServGate"] = &TopologyNode{ID: "ServGate", Label: "ServGate (Gateway)", Color: "#06b6d4", Online: true}
 	nodesMap["ServStore"] = &TopologyNode{ID: "ServStore", Label: "ServStore (Storage)", Color: "#10b981", Online: true}
 	nodesMap["ServQueue"] = &TopologyNode{ID: "ServQueue", Label: "ServQueue (Broker)", Color: "#f59e0b", Online: true}
+	nodesMap["ServTunnel"] = &TopologyNode{ID: "ServTunnel", Label: "ServTunnel (Relay)", Color: "#6366f1", Online: true}
 
 	spanToService := make(map[string]string)
 	for _, span := range spans {
@@ -1743,7 +1758,7 @@ func handleTopology(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, n := range nodes {
-		if n.ID != "ServGate" && n.ID != "ServStore" && n.ID != "ServQueue" {
+		if n.ID != "ServGate" && n.ID != "ServStore" && n.ID != "ServQueue" && n.ID != "ServTunnel" {
 			edgeKey := fmt.Sprintf("ServGate->%s", n.ID)
 			if _, exists := edgesMap[edgeKey]; !exists {
 				edges = append(edges, TopologyEdge{

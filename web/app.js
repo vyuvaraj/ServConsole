@@ -5,7 +5,8 @@ const STATE = {
   components: {
     ServGate: { online: false, latency: 0, details: null },
     ServQueue: { online: false, latency: 0, details: null },
-    ServStore: { online: false, latency: 0, details: null }
+    ServStore: { online: false, latency: 0, details: null },
+    ServTunnel: { online: false, latency: 0, details: null }
   },
   routes: [],
   buckets: [],
@@ -187,6 +188,22 @@ function updateSummaryUI() {
     storeCard.querySelector('.badge').className = 'badge offline';
     storeCard.querySelector('.badge').textContent = 'OFFLINE';
     storeBuckets.textContent = '— bkts';
+  }
+
+  // ServTunnel Card
+  const tunnel = STATE.components.ServTunnel;
+  const tunnelCard = document.getElementById('tunnel-summary-card');
+  const tunnelActive = document.getElementById('tunnel-active');
+  if (tunnelCard && tunnelActive) {
+    if (tunnel.online) {
+      tunnelCard.querySelector('.badge').className = 'badge online';
+      tunnelCard.querySelector('.badge').textContent = 'ONLINE';
+      tunnelActive.textContent = `${tunnel.latency} ms`;
+    } else {
+      tunnelCard.querySelector('.badge').className = 'badge offline';
+      tunnelCard.querySelector('.badge').textContent = 'OFFLINE';
+      tunnelActive.textContent = '— ms';
+    }
   }
 }
 
