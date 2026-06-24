@@ -25,6 +25,7 @@ const NODE_COLORS = [
 ];
 
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   checkAuthConfig();
   initTabs();
   initForms();
@@ -32,6 +33,24 @@ document.addEventListener('DOMContentLoaded', () => {
   initRingCanvas();
   initAuditLogsUI();
 });
+
+function initTheme() {
+  const toggleBtn = document.getElementById('btn-theme-toggle');
+  if (!toggleBtn) return;
+
+  const currentTheme = localStorage.getItem('theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', currentTheme);
+  toggleBtn.textContent = currentTheme === 'light' ? '🌙' : '☀️';
+
+  toggleBtn.addEventListener('click', () => {
+    const activeTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+    const newTheme = activeTheme === 'light' ? 'dark' : 'light';
+    
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    toggleBtn.textContent = newTheme === 'light' ? '🌙' : '☀️';
+  });
+}
 
 // --- Tab Switching ---
 function initTabs() {

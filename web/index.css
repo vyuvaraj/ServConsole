@@ -23,6 +23,47 @@
   
   --shadow-lg: 0 10px 30px -5px hsla(0, 0%, 0%, 0.5);
   --shadow-glow: 0 0 20px 2px var(--primary-glow);
+
+  --bg-navbar: rgba(20, 22, 35, 0.4);
+  --bg-glass-card: rgba(25, 28, 45, 0.45);
+  --bg-logs-box: hsl(230, 25%, 5%);
+  --bg-span-details: rgba(15, 17, 32, 0.6);
+  --bg-tab-hover: rgba(255, 255, 255, 0.04);
+  --bg-tab-active: rgba(138, 92, 246, 0.08);
+  --bg-input: rgba(255, 255, 255, 0.03);
+  --bg-input-focus: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="light"] {
+  --bg-primary: hsl(230, 25%, 96%);
+  --bg-secondary: hsl(230, 20%, 91%);
+  --bg-tertiary: hsl(230, 20%, 86%);
+  --border-glass: hsla(230, 25%, 10%, 0.08);
+  --border-glass-focus: hsla(250, 100%, 60%, 0.3);
+  
+  --primary: hsl(250, 85%, 55%);
+  --primary-glow: hsla(250, 85%, 55%, 0.15);
+  --secondary: hsl(190, 85%, 40%);
+  --secondary-glow: hsla(190, 85%, 40%, 0.15);
+  
+  --success: hsl(145, 80%, 35%);
+  --warning: hsl(40, 85%, 40%);
+  --danger: hsl(355, 80%, 45%);
+  --text-primary: hsl(230, 25%, 12%);
+  --text-secondary: hsl(230, 15%, 35%);
+  --text-muted: hsl(230, 10%, 55%);
+  
+  --shadow-lg: 0 10px 30px -5px hsla(230, 25%, 50%, 0.12);
+  --shadow-glow: 0 0 20px 2px var(--primary-glow);
+
+  --bg-navbar: rgba(255, 255, 255, 0.6);
+  --bg-glass-card: rgba(255, 255, 255, 0.65);
+  --bg-logs-box: hsl(230, 20%, 93%);
+  --bg-span-details: rgba(255, 255, 255, 0.85);
+  --bg-tab-hover: rgba(0, 0, 0, 0.04);
+  --bg-tab-active: rgba(138, 92, 246, 0.08);
+  --bg-input: rgba(0, 0, 0, 0.03);
+  --bg-input-focus: rgba(0, 0, 0, 0.05);
 }
 
 * {
@@ -68,7 +109,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 1rem 1.5rem;
-  background: rgba(20, 22, 35, 0.4);
+  background: var(--bg-navbar);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-glass);
@@ -138,12 +179,12 @@ body {
 
 .tab-btn:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-tab-hover);
 }
 
 .tab-btn.active {
   color: var(--primary);
-  background: rgba(138, 92, 246, 0.08);
+  background: var(--bg-tab-active);
   border-color: var(--border-glass-focus);
   box-shadow: 0 0 12px var(--primary-glow);
 }
@@ -180,7 +221,7 @@ body {
 
 /* Glassmorphic Panel/Card styles */
 .glass-card {
-  background: rgba(25, 28, 45, 0.45);
+  background: var(--bg-glass-card);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-glass);
@@ -377,7 +418,7 @@ h2 {
 input[type="text"],
 input[type="number"],
 textarea {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-input);
   border: 1px solid var(--border-glass);
   border-radius: 8px;
   color: var(--text-primary);
@@ -392,7 +433,7 @@ input[type="text"]:focus,
 input[type="number"]:focus,
 textarea:focus {
   border-color: var(--primary);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg-input-focus);
   box-shadow: 0 0 8px var(--primary-glow);
 }
 
@@ -560,7 +601,7 @@ tr:hover td {
 
 /* Logs and Timelines */
 .console-logs-box {
-  background: hsl(230, 25%, 5%);
+  background: var(--bg-logs-box);
   border: 1px solid var(--border-glass);
   border-radius: 8px;
   height: 200px;
