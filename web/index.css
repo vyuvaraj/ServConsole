@@ -246,6 +246,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.summary-cards .card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-glass-focus);
+  box-shadow: 0 8px 24px var(--primary-glow);
 }
 
 .card-header {

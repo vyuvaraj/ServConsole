@@ -2414,4 +2414,30 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
     document.getElementById('btn-refresh-connections')?.addEventListener('click', fetchConnections);
   }, 1000);
+
+  // Wire up summary card click events
+  document.getElementById('gate-summary-card')?.addEventListener('click', () => {
+    document.querySelector('.tab-btn[data-tab="gateways"]')?.click();
+  });
+  document.getElementById('queue-summary-card')?.addEventListener('click', () => {
+    document.querySelector('.tab-btn[data-tab="queues"]')?.click();
+  });
+  document.getElementById('store-summary-card')?.addEventListener('click', () => {
+    document.querySelector('.tab-btn[data-tab="storage"]')?.click();
+  });
 });
+
+// Global navigation helpers
+window.switchToTracesTab = function(filterText) {
+  const tracesTabBtn = document.querySelector('.tab-btn[data-tab="traces"]');
+  if (tracesTabBtn) {
+    tracesTabBtn.click();
+  }
+  setTimeout(() => {
+    const searchInput = document.getElementById('trace-search');
+    if (searchInput) {
+      searchInput.value = filterText;
+      searchInput.dispatchEvent(new Event('input'));
+    }
+  }, 50);
+};
