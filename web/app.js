@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAuditLogsUI();
   initAlertsUI();
   initLogsUI();
+  initMobileMenu();
 });
 
 function initTheme() {
@@ -89,6 +90,8 @@ function initTabs() {
         loadPoliciesView();
       } else if (tabId === 'cost') {
         fetchCostEstimation();
+      } else if (tabId === 'slo') {
+        fetchSLOTargets();
       }
     });
   });
@@ -122,6 +125,8 @@ function initPolling() {
         fetchConnections();
       } else if (STATE.activeTab === 'queues') {
         refreshQueuesList();
+      } else if (STATE.activeTab === 'slo') {
+        fetchSLOTargets();
       }
     } catch (err) {
       logEvent('error', `Status polling failed: ${err.message}`);
@@ -2724,7 +2729,6 @@ async function fetchCostEstimation() {
       item.style.borderRadius = '4px';
       item.style.fontSize = '0.85rem';
       item.style.color = '#e2e8f0';
-
       item.textContent = rec;
       recContainer.appendChild(item);
     });
@@ -2732,4 +2736,157 @@ async function fetchCostEstimation() {
   } catch (err) {
     console.error('Failed to fetch cost estimation:', err);
   }
+}
+
+async function fetchSLOTargets() {
+  const container = document.getElementById('slo-indicators-container');
+  const statusEl = document.getElementById('slo-overall-status');
+  const recsContainer = document.getElementById('slo-recs-container');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/slo');
+    if (!res.ok) throw new Error('API returned error status');
+    const data = await res.json();
+
+    let breachedCount = 0;
+    let warningCount = 0;
+
+    container.innerHTML = '';
+    data.forEach(slo => {
+      let statusColor = 'var(--success)';
+      let statusText = 'HEALTHY';
+      let progressColor = 'var(--success)';
+      
+      if (slo.status === 'breached') {
+        statusColor = 'var(--danger, #ef4444)';
+        statusText = 'BREACHED';
+        progressColor = 'var(--danger, #ef4444)';
+        breachedCount++;
+      } else if (slo.status === 'warning') {
+        statusColor = 'var(--warning, #f59e0b)';
+        statusText = 'WARNING';
+        progressColor = 'var(--warning, #f59e0b)';
+        warningCount++;
+      }
+
+      const card = document.createElement('div');
+      card.style.background = 'rgba(255, 255, 255, 0.02)';
+      card.style.border = '1px solid rgba(255, 255, 255, 0.05)';
+      card.style.borderRadius = '8px';
+      card.style.padding = '1.25rem';
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.gap = '1rem';
+
+      card.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h3 style="margin:0; font-size:1rem; color:#fff;">${slo.name}</h3>
+            <span style="font-size:0.75rem; color:var(--text-secondary); font-family:var(--font-mono);">${slo.serviceId}</span>
+          </div>
+          <span class="badge" style="background:${statusColor}15; color:${statusColor}; border:1px solid ${statusColor}30;">${statusText}</span>
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:1rem; font-size:0.85rem; border-top: 1px solid rgba(255,255,255,0.03); padding-top:0.75rem;">
+          <div>
+            <div style="color:var(--text-muted); font-size:0.75rem; margin-bottom:0.25rem;">Target Compliance</div>
+            <strong>${slo.targetPercent.toFixed(2)}%</strong>
+          </div>
+          <div>
+            <div style="color:var(--text-muted); font-size:0.75rem; margin-bottom:0.25rem;">Actual Compliance</div>
+            <strong style="color:${statusColor}">${slo.actualPercent.toFixed(2)}%</strong>
+          </div>
+          <div>
+            <div style="color:var(--text-muted); font-size:0.75rem; margin-bottom:0.25rem;">Latency (Actual / Target)</div>
+            <strong>${slo.actualLatencyMs}ms / ${slo.targetLatencyMs}ms</strong>
+          </div>
+        </div>
+
+        <div>
+          <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:0.4rem;">
+            <span style="color:var(--text-secondary);">Error Budget Remaining</span>
+            <span style="font-weight:600; color:${progressColor};">${slo.budgetRemainingPercent.toFixed(1)}%</span>
+          </div>
+          <div style="background:rgba(255,255,255,0.05); height:8px; border-radius:4px; overflow:hidden;">
+            <div style="background:${progressColor}; width:${slo.budgetRemainingPercent}%; height:100%; transition:width 0.5s ease;"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:0.3rem;">
+            <span>Burn Rate: ${slo.burnRate.toFixed(1)}x</span>
+            <span>Est. Exhaustion: ${slo.burnRate > 1.0 ? Math.round(30 * (slo.budgetRemainingPercent / 100) / slo.burnRate) : '30+'} days</span>
+          </div>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+
+    // Update summary details
+    if (breachedCount > 0) {
+      statusEl.textContent = `${breachedCount} SLO(s) Breached`;
+      statusEl.style.color = 'var(--danger, #ef4444)';
+    } else if (warningCount > 0) {
+      statusEl.textContent = `${warningCount} SLO(s) in Warning State`;
+      statusEl.style.color = 'var(--warning, #f59e0b)';
+    } else {
+      statusEl.textContent = '100% Operational & Healthy';
+      statusEl.style.color = 'var(--success)';
+    }
+
+    recsContainer.innerHTML = '';
+    let adviceList = [];
+    data.forEach(slo => {
+      if (slo.status === 'breached') {
+        adviceList.push(`[CRITICAL] ${slo.serviceId} is exhausting its error budget rapidly! Uptime is below the ${slo.targetPercent}% target threshold. Investigate immediately.`);
+      } else if (slo.status === 'warning') {
+        adviceList.push(`[WARNING] Latency on ${slo.serviceId} is exceeding the targeted ${slo.targetLatencyMs}ms. Burn rate is currently ${slo.burnRate.toFixed(1)}x.`);
+      }
+    });
+
+    if (adviceList.length === 0) {
+      adviceList.push("No immediate action required. All system metrics comply with targets.");
+      adviceList.push("Protip: Keep an eye on consistent storage shards distribution to maintain sub-100ms read latency.");
+    }
+
+    adviceList.forEach(adv => {
+      const card = document.createElement('div');
+      card.style.padding = '0.75rem';
+      card.style.borderRadius = '4px';
+      card.style.fontSize = '0.8rem';
+      if (adv.startsWith('[CRITICAL]')) {
+        card.style.background = 'rgba(239, 68, 68, 0.05)';
+        card.style.borderLeft = '3px solid var(--danger, #ef4444)';
+        card.style.color = '#fca5a5';
+      } else if (adv.startsWith('[WARNING]')) {
+        card.style.background = 'rgba(245, 158, 11, 0.05)';
+        card.style.borderLeft = '3px solid var(--warning, #f59e0b)';
+        card.style.color = '#fef3c7';
+      } else {
+        card.style.background = 'rgba(255, 255, 255, 0.02)';
+        card.style.borderLeft = '3px solid var(--primary)';
+        card.style.color = 'var(--text-secondary)';
+      }
+      card.textContent = adv;
+      recsContainer.appendChild(card);
+    });
+
+  } catch (err) {
+    console.error('Failed to fetch SLO targets:', err);
+  }
+}
+
+function initMobileMenu() {
+  const menuBtn = document.getElementById('mobile-menu-btn');
+  const navTabs = document.getElementById('main-nav-tabs');
+  if (!menuBtn || !navTabs) return;
+
+  menuBtn.addEventListener('click', () => {
+    navTabs.classList.toggle('mobile-active');
+  });
+
+  // Close nav menu on tab clicks on mobile
+  navTabs.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      navTabs.classList.remove('mobile-active');
+    });
+  });
 }

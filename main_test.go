@@ -411,3 +411,51 @@ func TestHandleCostEstimation(t *testing.T) {
 	}
 }
 
+func TestHandleSLO(t *testing.T) {
+	oldGate := *gateUrl
+	oldStore := *storeUrl
+	oldQueue := *queueUrl
+	oldTunnel := *tunnelUrl
+	defer func() {
+		*gateUrl = oldGate
+		*storeUrl = oldStore
+		*queueUrl = oldQueue
+		*tunnelUrl = oldTunnel
+	}()
+
+	mockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer mockSrv.Close()
+
+	*gateUrl = mockSrv.URL
+	*storeUrl = mockSrv.URL
+	*queueUrl = mockSrv.URL
+	*tunnelUrl = mockSrv.URL
+
+	req := httptest.NewRequest("GET", "/api/slo", nil)
+	w := httptest.NewRecorder()
+	handleSLO(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var slos []SLOIndicator
+	if err := json.NewDecoder(resp.Body).Decode(&slos); err != nil {
+		t.Fatalf("failed to decode SLO list: %v", err)
+	}
+
+	if len(slos) != 4 {
+		t.Errorf("expected 4 SLO items, got %d", len(slos))
+	}
+
+	for _, slo := range slos {
+		if slo.ServiceID == "" || slo.Name == "" || slo.TargetPercent <= 0 {
+			t.Errorf("invalid SLO item parsed: %+v", slo)
+		}
+	}
+}
+

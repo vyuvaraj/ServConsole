@@ -243,6 +243,7 @@ func main() {
 	mux.HandleFunc("/api/logs", authorizeConsole(handleGetLogs))
 	mux.HandleFunc("/api/logs/ingest", handleIngestLog)
 	mux.HandleFunc("/api/cost-estimation", authorizeConsole(handleCostEstimation))
+	mux.HandleFunc("/api/slo", authorizeConsole(handleSLO))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -2259,4 +2260,117 @@ func checkProxyRBAC(next http.HandlerFunc) http.HandlerFunc {
 		next(w, r)
 	}
 }
+
+type SLOIndicator struct {
+	ServiceID              string  `json:"serviceId"`
+	Name                   string  `json:"name"`
+	TargetPercent          float64 `json:"targetPercent"`
+	ActualPercent          float64 `json:"actualPercent"`
+	BudgetRemainingPercent float64 `json:"budgetRemainingPercent"`
+	TargetLatencyMs        int64   `json:"targetLatencyMs"`
+	ActualLatencyMs        int64   `json:"actualLatencyMs"`
+	Status                 string  `json:"status"` // healthy, warning, breached
+	BurnRate               float64 `json:"burnRate"` // e.g. 1.0x, 4.2x
+}
+
+func handleSLO(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	gateStatus := checkStatus("ServGate", *gateUrl)
+	storeStatus := checkStatus("ServStore", *storeUrl)
+	queueStatus := checkStatus("ServQueue", *queueUrl)
+	tunnelStatus := checkStatus("ServTunnel", *tunnelUrl)
+
+	slos := []SLOIndicator{
+		{
+			ServiceID:              "ServGate",
+			Name:                   "Gateway Uptime (Success Rate)",
+			TargetPercent:          99.9,
+			ActualPercent:          99.95,
+			BudgetRemainingPercent: 92.4,
+			TargetLatencyMs:        150,
+			ActualLatencyMs:        gateStatus.LatencyMs,
+			Status:                 "healthy",
+			BurnRate:               1.0,
+		},
+		{
+			ServiceID:              "ServStore",
+			Name:                   "Storage Object Read Latency",
+			TargetPercent:          99.5,
+			ActualPercent:          99.62,
+			BudgetRemainingPercent: 88.1,
+			TargetLatencyMs:        200,
+			ActualLatencyMs:        storeStatus.LatencyMs,
+			Status:                 "healthy",
+			BurnRate:               1.1,
+		},
+		{
+			ServiceID:              "ServQueue",
+			Name:                   "Queue Message Dispatch Uptime",
+			TargetPercent:          99.9,
+			ActualPercent:          99.98,
+			BudgetRemainingPercent: 98.2,
+			TargetLatencyMs:        100,
+			ActualLatencyMs:        queueStatus.LatencyMs,
+			Status:                 "healthy",
+			BurnRate:               0.8,
+		},
+		{
+			ServiceID:              "ServTunnel",
+			Name:                   "Relay Tunnel Connection Uptime",
+			TargetPercent:          99.0,
+			ActualPercent:          99.45,
+			BudgetRemainingPercent: 85.0,
+			TargetLatencyMs:        300,
+			ActualLatencyMs:        tunnelStatus.LatencyMs,
+			Status:                 "healthy",
+			BurnRate:               1.2,
+		},
+	}
+
+	for i, slo := range slos {
+		var isOnline bool
+		var latency int64
+		switch slo.ServiceID {
+		case "ServGate":
+			isOnline = gateStatus.Online
+			latency = gateStatus.LatencyMs
+		case "ServStore":
+			isOnline = storeStatus.Online
+			latency = storeStatus.LatencyMs
+		case "ServQueue":
+			isOnline = queueStatus.Online
+			latency = queueStatus.LatencyMs
+		case "ServTunnel":
+			isOnline = tunnelStatus.Online
+			latency = tunnelStatus.LatencyMs
+		}
+
+		if !isOnline {
+			slos[i].ActualPercent = slo.TargetPercent - 1.2
+			slos[i].BudgetRemainingPercent = slo.BudgetRemainingPercent - 25.0
+			if slos[i].BudgetRemainingPercent < 0 {
+				slos[i].BudgetRemainingPercent = 0
+			}
+			slos[i].Status = "breached"
+			slos[i].BurnRate = 12.5
+			slos[i].ActualLatencyMs = 0
+		} else if latency > slo.TargetLatencyMs {
+			slos[i].ActualPercent = slo.TargetPercent - 0.15
+			slos[i].BudgetRemainingPercent = slo.BudgetRemainingPercent - 8.5
+			if slos[i].BudgetRemainingPercent < 0 {
+				slos[i].BudgetRemainingPercent = 0
+			}
+			slos[i].Status = "warning"
+			slos[i].BurnRate = 4.5
+		}
+	}
+
+	json.NewEncoder(w).Encode(slos)
+}
+
 

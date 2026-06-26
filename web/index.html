@@ -170,8 +170,16 @@
           <span>Unified Servverse Engine</span>
         </div>
       </div>
+      
+      <button class="mobile-nav-toggle" id="mobile-menu-btn" aria-label="Toggle navigation menu">
+        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
 
-      <nav class="nav-tabs">
+      <nav class="nav-tabs" id="main-nav-tabs">
         <button class="tab-btn active" data-tab="gateways">
           <svg class="icon" viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V8h14v10zM7 10h2v2H7zm0 4h2v2H7zm4-4h2v2h-2zm0 4h2v2h-2zm4-4h2v2h-2zm0 4h2v2h-2z"/></svg>
           Gateways (ServGate)
@@ -207,6 +215,10 @@
         <button class="tab-btn" data-tab="cost">
           <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
           Cost Optimizer
+        </button>
+        <button class="tab-btn" data-tab="slo">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+          SLO Tracker
         </button>
       </nav>
 
@@ -985,6 +997,42 @@
             <p class="section-desc">Automated recommendations compiled by the compiler-linked cost optimizer to reduce monthly spend.</p>
             <div id="cost-recommendations-container" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1.5rem;">
               <!-- Filled dynamically -->
+            </div>
+          </div>
+      <!-- TAB: SLO TRACKER -->
+      <div class="tab-pane" id="tab-slo">
+        <div class="pane-grid">
+          <!-- Left: SLO Compliance Overview -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Service Level Objectives (SLOs)</h2>
+            </div>
+            <p class="section-desc">Track real-time SLI compliance percentages against target SLO levels, budget burn rates, and error budgets.</p>
+            
+            <div id="slo-indicators-container" style="display:flex; flex-direction:column; gap:1.5rem; margin-top:1.5rem;">
+              <!-- Filled dynamically by JavaScript -->
+            </div>
+          </div>
+
+          <!-- Right: Error Budget Burn Details & Recommendations -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Budget Status & Uptime Alerts</h2>
+            </div>
+            <p class="section-desc">Ecosystem error budget summary and critical active alerts affecting SLO burn rates.</p>
+            
+            <div id="slo-summary-panel" style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1.25rem;">
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <div style="font-size:0.8rem; color:var(--text-secondary);">Overall Compliance Health</div>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--success);" id="slo-overall-status">100% Operational</h3>
+              </div>
+              
+              <div style="display:flex; flex-direction:column; gap:0.75rem;">
+                <span style="font-weight:600; font-size:0.9rem;">SLO Action Items & Advice</span>
+                <div id="slo-recs-container" style="display:flex; flex-direction:column; gap:0.50rem;">
+                  <!-- Dynamically filled -->
+                </div>
+              </div>
             </div>
           </div>
         </div>

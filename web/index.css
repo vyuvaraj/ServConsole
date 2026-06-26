@@ -1165,3 +1165,100 @@ tr:hover td {
   transform: translateY(-1px);
   box-shadow: 0 6px 16px rgba(239, 68, 68, 0.35);
 }
+
+/* ─── Mobile Menu Toggle Button & Responsive Media Queries ──────────────── */
+
+.mobile-nav-toggle {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--border-glass);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.mobile-nav-toggle:hover {
+  background: var(--bg-tab-hover);
+  color: var(--text-primary);
+}
+
+@media (max-width: 1200px) {
+  .navbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+  
+  .navbar > div {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 900px) {
+  .pane-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .span-2 {
+    grid-column: span 1 !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .navbar {
+    position: relative;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+  }
+
+  .mobile-nav-toggle {
+    display: flex;
+  }
+
+  .nav-tabs {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    background: rgba(15, 17, 32, 0.98);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border-glass);
+    border-radius: 12px;
+    flex-direction: column;
+    padding: 0.5rem;
+    z-index: 1001;
+    box-shadow: var(--shadow-lg);
+    gap: 0.25rem;
+  }
+
+  .nav-tabs.mobile-active {
+    display: flex;
+  }
+
+  .tab-btn {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 0.75rem 1rem;
+  }
+
+  .summary-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .app-container {
+    padding: 0.75rem;
+  }
+  
+  .console-logs-box, .code-editor, pre, table {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
