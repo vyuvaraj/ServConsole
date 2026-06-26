@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initPolling();
   initRingCanvas();
   initAuditLogsUI();
+  initAlertsUI();
 });
 
 function initTheme() {
@@ -126,6 +127,12 @@ function initPolling() {
   
   poll();
   setInterval(poll, 3000);
+
+  // Poll alerts every 5 seconds
+  if (typeof pollAlerts === 'function') {
+    pollAlerts();
+    setInterval(pollAlerts, 5000);
+  }
 }
 
 function updateSummaryUI() {
@@ -1772,8 +1779,10 @@ async function clearTraces() {
 async function showTraceDetail(traceId) {
   const timeline = document.getElementById('traces-timeline');
   const badge = document.getElementById('waterfall-trace-id-badge');
+  const replayBtn = document.getElementById('btn-replay-trace');
   if (!timeline) return;
   
+  if (replayBtn) replayBtn.style.display = 'none';
   badge.textContent = `TRACE ID: ${traceId.slice(0, 8)}...`;
   timeline.innerHTML = `<div class="text-center text-muted" style="padding: 4rem 0;">Loading trace tree...</div>`;
   
@@ -1789,6 +1798,9 @@ async function showTraceDetail(traceId) {
     // We want to find the max duration of the trace to compute bar widths relative to total duration
     const totalDuration = findMaxDuration(rootNode);
     renderSpanNodeWaterfall(timeline, rootNode, totalDuration, 0);
+
+    STATE.selectedTraceId = traceId;
+    if (replayBtn) replayBtn.style.display = 'inline-block';
   } catch (err) {
     timeline.innerHTML = `<div class="text-center text-muted">Error loading tree: ${err.message}</div>`;
   }
@@ -2441,3 +2453,151 @@ window.switchToTracesTab = function(filterText) {
     }
   }, 50);
 };
+
+// Alerts & Replay Logic
+function initAlertsUI() {
+  const alertsToggle = document.getElementById('btn-alerts-toggle');
+  const alertsPanel = document.getElementById('alerts-dropdown-panel');
+  const dismissAllBtn = document.getElementById('btn-alerts-clear');
+
+  if (alertsToggle && alertsPanel) {
+    alertsToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      alertsPanel.style.display = alertsPanel.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!alertsPanel.contains(e.target) && e.target !== alertsToggle) {
+        alertsPanel.style.display = 'none';
+      }
+    });
+  }
+
+  if (dismissAllBtn) {
+    dismissAllBtn.addEventListener('click', async () => {
+      const activeAlerts = STATE.alerts || [];
+      const unackAlerts = activeAlerts.filter(a => !a.acknowledged);
+      for (const alert of unackAlerts) {
+        await ackAlert(alert.id);
+      }
+      pollAlerts();
+    });
+  }
+
+  const replayBtn = document.getElementById('btn-replay-trace');
+  if (replayBtn) {
+    replayBtn.addEventListener('click', replaySelectedTrace);
+  }
+}
+
+async function pollAlerts() {
+  try {
+    const res = await fetch('/api/alerts');
+    if (!res.ok) return;
+    const alertsList = await res.json();
+    STATE.alerts = alertsList;
+    renderAlertsDropdown(alertsList);
+  } catch (err) {
+    console.error('Failed to poll alerts:', err);
+  }
+}
+
+function renderAlertsDropdown(alertsList) {
+  const badge = document.getElementById('alerts-count-badge');
+  const container = document.getElementById('alerts-list-container');
+  if (!badge || !container) return;
+
+  const unackAlerts = alertsList.filter(a => !a.acknowledged);
+  
+  if (unackAlerts.length > 0) {
+    badge.textContent = unackAlerts.length;
+    badge.style.display = 'flex';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  container.innerHTML = '';
+  if (alertsList.length === 0) {
+    container.innerHTML = `<div class="text-center text-muted" style="padding: 1rem 0; font-size: 0.85rem;">No active alerts</div>`;
+    return;
+  }
+
+  alertsList.forEach(alert => {
+    const item = document.createElement('div');
+    item.className = `alert-item ${alert.severity} ${alert.acknowledged ? 'acknowledged' : ''}`;
+    if (alert.acknowledged) {
+      item.style.opacity = '0.5';
+    }
+
+    const time = new Date(alert.timestamp).toLocaleTimeString();
+    
+    item.innerHTML = `
+      <div class="alert-item-header">
+        <span>${alert.component}</span>
+        <span class="alert-item-time">${time}</span>
+      </div>
+      <div style="font-size: 0.85rem; color: #e2e8f0; margin-bottom: 0.25rem;">${alert.message}</div>
+      ${!alert.acknowledged ? `
+        <button class="btn btn-secondary btn-sm" style="font-size: 0.7rem; padding: 0.1rem 0.3rem; align-self: flex-end;" onclick="ackAlert('${alert.id}')">Acknowledge</button>
+      ` : ''}
+    `;
+    container.appendChild(item);
+  });
+}
+
+async function ackAlert(id) {
+  try {
+    const res = await fetch('/api/alerts/ack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (res.ok) {
+      logEvent('system', `Alert ${id} acknowledged`);
+      pollAlerts();
+    }
+  } catch (err) {
+    console.error('Failed to ack alert:', err);
+  }
+}
+window.ackAlert = ackAlert;
+
+async function replaySelectedTrace() {
+  const traceId = STATE.selectedTraceId;
+  if (!traceId) return;
+
+  const replayBtn = document.getElementById('btn-replay-trace');
+  if (replayBtn) {
+    replayBtn.disabled = true;
+    replayBtn.textContent = '⚡ Replaying...';
+  }
+
+  logEvent('trace', `Replaying request from trace: ${traceId}`);
+
+  try {
+    const res = await fetch('/api/traces/replay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ traceId })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        logEvent('trace', `✓ Replay Succeeded! Code: ${data.statusCode}. Response: ${data.body.slice(0, 100)}`);
+      } else {
+        logEvent('error', `✗ Replay Failed! Code: ${data.statusCode}. Response: ${data.body.slice(0, 100)}`);
+      }
+    } else {
+      const errText = await res.text();
+      logEvent('error', `✗ Replay Failed: ${errText}`);
+    }
+  } catch (err) {
+    logEvent('error', `✗ Replay Network Error: ${err.message}`);
+  } finally {
+    if (replayBtn) {
+      replayBtn.disabled = false;
+      replayBtn.textContent = '⚡ Replay Request';
+    }
+  }
+}

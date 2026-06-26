@@ -53,7 +53,7 @@ This document outlines the design phases, completed modules, and upcoming featur
 | 6.5 | **CI/CD pipeline (GitHub Actions)** | Small | Automated build, test, and format checks on every PR. Currently missing. | [x] |
 | 6.6 | **RBAC on console access** | Medium | Restrict which dashboard panels/actions are available based on user role (viewer vs operator vs admin). | [x] |
 | 6.7 | **Dark/light theme toggle** | Small | Currently glassmorphic dark only — add light mode for accessibility and preference. | [x] |
-| 6.8 | **Cross-service request replay** | Large | Select an OTel trace, click "Replay" to re-issue the original request through ServGate — useful for debugging. | [ ] |
+| 6.8 | **Cross-service request replay** | Large | Select an OTel trace, click "Replay" to re-issue the original request through ServGate — useful for debugging. | [x] |
 
 ---
 
@@ -63,7 +63,7 @@ These items take ServConsole from a dashboard into a **full observability and op
 
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
-| 7.1 | **Alerting engine & notification channels** | Large | Define alert rules (latency > 500ms, error rate > 5%, disk > 90%) with notification to Slack, email, PagerDuty, or webhook. Snooze/ack workflow. | [ ] |
+| 7.1 | **Alerting engine & notification channels** | Large | Define alert rules (latency > 500ms, error rate > 5%, disk > 90%) with notification to Slack, email, PagerDuty, or webhook. Snooze/ack workflow. | [x] |
 | 7.2 | **Incident timeline auto-generation** | Large | When an alert fires, automatically build a timeline: what changed (deploys, config), what metrics spiked, which traces errored. One-page incident summary. | [ ] |
 | 7.3 | **Service topology auto-discovery** | Medium | Parse OTel trace spans to automatically build a service dependency graph. Show which services call which, latency between them, and error rates on edges. | [ ] |
 | 7.4 | **Log aggregation & search** | Large | Collect structured JSON logs from all services (via stdout scraping or push API). Full-text search, filter by service/level/trace_id, and live tail. | [ ] |

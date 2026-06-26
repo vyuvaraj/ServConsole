@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -204,6 +205,120 @@ func TestHandleStatusHealthz(t *testing.T) {
 		if !compMap["online"].(bool) {
 			t.Errorf("component %s expected to be online", compMap["name"])
 		}
+	}
+}
+
+func TestHandleAlerts(t *testing.T) {
+	alertsMu.Lock()
+	alerts = make([]Alert, 0)
+	addOrUpdateAlert("TestComponent", "offline", "TestComponent is offline", "critical")
+	alertsMu.Unlock()
+
+	// 1. Get alerts
+	req := httptest.NewRequest("GET", "/api/alerts", nil)
+	w := httptest.NewRecorder()
+	handleAlerts(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var alertList []Alert
+	if err := json.NewDecoder(resp.Body).Decode(&alertList); err != nil {
+		t.Fatalf("failed to parse alerts: %v", err)
+	}
+
+	if len(alertList) != 1 || alertList[0].Component != "TestComponent" || alertList[0].Acknowledged {
+		t.Errorf("unexpected alerts list: %v", alertList)
+	}
+
+	// 2. Ack alert
+	alertID := alertList[0].ID
+	ackPayload := `{"id":"` + alertID + `"}`
+	ackReq := httptest.NewRequest("POST", "/api/alerts/ack", strings.NewReader(ackPayload))
+	ackReq.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handleAlertsAck(w2, ackReq)
+
+	if w2.Result().StatusCode != http.StatusOK {
+		t.Fatalf("ack failed with status: %d", w2.Result().StatusCode)
+	}
+
+	alertsMu.Lock()
+	if len(alerts) != 1 || !alerts[0].Acknowledged {
+		t.Errorf("expected alert to be acknowledged, got: %v", alerts)
+	}
+	alertsMu.Unlock()
+}
+
+func TestHandleTraceReplay(t *testing.T) {
+	oldTraceUrl := *traceUrl
+	oldGateUrl := *gateUrl
+	defer func() {
+		*traceUrl = oldTraceUrl
+		*gateUrl = oldGateUrl
+	}()
+
+	// Mock trace server
+	mockTraceSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/traces/test-trace-id" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"span": {
+					"name": "POST /api/v1/test",
+					"attributes": {
+						"http.request.body": "{\"hello\":\"world\"}",
+						"http.request.header.content-type": "application/json"
+					}
+				}
+			}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockTraceSrv.Close()
+
+	// Mock gate server
+	var receivedBody string
+	var receivedMethod string
+	mockGateSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/test" {
+			receivedMethod = r.Method
+			bodyBytes, _ := io.ReadAll(r.Body)
+			receivedBody = string(bodyBytes)
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"success"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockGateSrv.Close()
+
+	*traceUrl = mockTraceSrv.URL
+	*gateUrl = mockGateSrv.URL
+
+	replayPayload := `{"traceId":"test-trace-id"}`
+	req := httptest.NewRequest("POST", "/api/traces/replay", strings.NewReader(replayPayload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handleTraceReplay(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var res ReplayResponse
+	json.NewDecoder(resp.Body).Decode(&res)
+
+	if !res.Success || res.StatusCode != http.StatusOK || !strings.Contains(res.Body, "success") {
+		t.Errorf("unexpected replay outcome: %+v", res)
+	}
+
+	if receivedMethod != "POST" || receivedBody != `{"hello":"world"}` {
+		t.Errorf("request was not replayed correctly to ServGate: method=%s body=%s", receivedMethod, receivedBody)
 	}
 }
 

@@ -231,6 +231,9 @@ func main() {
 	mux.HandleFunc("/api/db/query", authorizeConsole(handleDbQuery))
 	mux.HandleFunc("/api/db/migrations", authorizeConsole(handleMigrations))
 	mux.HandleFunc("/api/topology", authorizeConsole(handleTopology))
+	mux.HandleFunc("/api/traces/replay", authorizeConsole(handleTraceReplay))
+	mux.HandleFunc("/api/alerts", authorizeConsole(handleAlerts))
+	mux.HandleFunc("/api/alerts/ack", authorizeConsole(handleAlertsAck))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -272,6 +275,7 @@ func main() {
 	defer stop()
 
 	go startEventBroadcaster(ctx)
+	go startAlertMonitoring(ctx)
 
 
 	go func() {
@@ -1772,6 +1776,245 @@ func handleTopology(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(TopologyResponse{Nodes: nodes, Edges: edges})
+}
+
+type ReplayRequest struct {
+	TraceID string `json:"traceId"`
+}
+
+type ReplayResponse struct {
+	Success    bool   `json:"success"`
+	StatusCode int    `json:"statusCode"`
+	Body       string `json:"body"`
+	Error      string `json:"error,omitempty"`
+}
+
+func handleTraceReplay(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ReplayRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteJSONError(w, r, "Invalid request body", "ERR_INVALID_BODY", http.StatusBadRequest)
+		return
+	}
+
+	traceID := req.TraceID
+	if traceID == "" {
+		WriteJSONError(w, r, "Trace ID is required", "ERR_TRACE_ID_REQUIRED", http.StatusBadRequest)
+		return
+	}
+
+	traceDetailUrl := fmt.Sprintf("%s/api/traces/%s", *traceUrl, traceID)
+	resp, err := http.Get(traceDetailUrl)
+	if err != nil {
+		WriteJSONError(w, r, fmt.Sprintf("Failed to fetch trace from ServTrace: %v", err), "ERR_FETCH_TRACE_FAILED", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		WriteJSONError(w, r, "Trace not found in ServTrace", "ERR_TRACE_NOT_FOUND", http.StatusNotFound)
+		return
+	}
+
+	var rootNode struct {
+		Span struct {
+			Name       string                 `json:"name"`
+			Attributes map[string]interface{} `json:"attributes"`
+		} `json:"span"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rootNode); err != nil {
+		WriteJSONError(w, r, fmt.Sprintf("Failed to parse trace: %v", err), "ERR_PARSE_TRACE_FAILED", http.StatusInternalServerError)
+		return
+	}
+
+	parts := strings.SplitN(rootNode.Span.Name, " ", 2)
+	if len(parts) < 2 {
+		WriteJSONError(w, r, "Invalid root span name format. Expected 'METHOD PATH'", "ERR_INVALID_SPAN_FORMAT", http.StatusBadRequest)
+		return
+	}
+	method := parts[0]
+	path := parts[1]
+
+	bodyStr, _ := rootNode.Span.Attributes["http.request.body"].(string)
+	contentType, _ := rootNode.Span.Attributes["http.request.header.content-type"].(string)
+
+	gateReplayUrl := fmt.Sprintf("%s%s", *gateUrl, path)
+	var gateReq *http.Request
+	if bodyStr != "" {
+		gateReq, err = http.NewRequest(method, gateReplayUrl, strings.NewReader(bodyStr))
+	} else {
+		gateReq, err = http.NewRequest(method, gateReplayUrl, nil)
+	}
+
+	if err != nil {
+		WriteJSONError(w, r, fmt.Sprintf("Failed to create replay request: %v", err), "ERR_CREATE_REQUEST_FAILED", http.StatusInternalServerError)
+		return
+	}
+
+	if contentType != "" {
+		gateReq.Header.Set("Content-Type", contentType)
+	}
+	if *authToken != "" {
+		gateReq.Header.Set("Authorization", "Bearer "+*authToken)
+	}
+	gateReq.Header.Set("X-Replayed-From", traceID)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	gateResp, err := client.Do(gateReq)
+	if err != nil {
+		json.NewEncoder(w).Encode(ReplayResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to replay request through ServGate: %v", err),
+		})
+		return
+	}
+	defer gateResp.Body.Close()
+
+	gateBodyBytes, _ := io.ReadAll(gateResp.Body)
+
+	json.NewEncoder(w).Encode(ReplayResponse{
+		Success:    gateResp.StatusCode >= 200 && gateResp.StatusCode < 300,
+		StatusCode: gateResp.StatusCode,
+		Body:       string(gateBodyBytes),
+	})
+}
+
+type Alert struct {
+	ID           string    `json:"id"`
+	Component    string    `json:"component"`
+	Type         string    `json:"type"`
+	Message      string    `json:"message"`
+	Severity     string    `json:"severity"`
+	Timestamp    time.Time `json:"timestamp"`
+	Acknowledged bool      `json:"acknowledged"`
+}
+
+var (
+	alerts   = make([]Alert, 0)
+	alertsMu sync.Mutex
+)
+
+func startAlertMonitoring(ctx context.Context) {
+	ticker := time.NewTicker(4 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			components := []struct {
+				name string
+				url  string
+			}{
+				{"ServGate", *gateUrl},
+				{"ServStore", *storeUrl},
+				{"ServQueue", *queueUrl},
+				{"ServTunnel", *tunnelUrl},
+			}
+
+			for _, c := range components {
+				status := checkStatus(c.name, c.url)
+
+				alertsMu.Lock()
+				if !status.Online {
+					addOrUpdateAlert(c.name, "offline", fmt.Sprintf("%s is OFFLINE", c.name), "critical")
+				} else {
+					clearAlert(c.name, "offline")
+
+					if status.LatencyMs > 250 {
+						addOrUpdateAlert(c.name, "high_latency", fmt.Sprintf("High Latency on %s: %dms", c.name, status.LatencyMs), "warning")
+					} else {
+						clearAlert(c.name, "high_latency")
+					}
+				}
+				alertsMu.Unlock()
+			}
+		}
+	}
+}
+
+func addOrUpdateAlert(component, alertType, message, severity string) {
+	for i, alert := range alerts {
+		if alert.Component == component && alert.Type == alertType {
+			alerts[i].Message = message
+			alerts[i].Timestamp = time.Now()
+			return
+		}
+	}
+
+	id := fmt.Sprintf("alert-%d", time.Now().UnixNano())
+	alerts = append(alerts, Alert{
+		ID:           id,
+		Component:    component,
+		Type:         alertType,
+		Message:      message,
+		Severity:     severity,
+		Timestamp:    time.Now(),
+		Acknowledged: false,
+	})
+}
+
+func clearAlert(component, alertType string) {
+	for i, alert := range alerts {
+		if alert.Component == component && alert.Type == alertType {
+			alerts = append(alerts[:i], alerts[i+1:]...)
+			return
+		}
+	}
+}
+
+func handleAlerts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	alertsMu.Lock()
+	defer alertsMu.Unlock()
+
+	json.NewEncoder(w).Encode(alerts)
+}
+
+func handleAlertsAck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteJSONError(w, r, "Invalid request body", "ERR_INVALID_BODY", http.StatusBadRequest)
+		return
+	}
+
+	alertsMu.Lock()
+	defer alertsMu.Unlock()
+
+	found := false
+	for i, alert := range alerts {
+		if alert.ID == req.ID {
+			alerts[i].Acknowledged = true
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		WriteJSONError(w, r, "Alert not found", "ERR_ALERT_NOT_FOUND", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{"success": true})
 }
 
 func getUserRole(r *http.Request) string {
