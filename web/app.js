@@ -2538,6 +2538,7 @@ function renderAlertsDropdown(alertsList) {
   alertsList.forEach(alert => {
     const item = document.createElement('div');
     item.className = `alert-item ${alert.severity} ${alert.acknowledged ? 'acknowledged' : ''}`;
+    item.style.cursor = 'pointer';
     if (alert.acknowledged) {
       item.style.opacity = '0.5';
     }
@@ -2550,10 +2551,16 @@ function renderAlertsDropdown(alertsList) {
         <span class="alert-item-time">${time}</span>
       </div>
       <div style="font-size: 0.85rem; color: #e2e8f0; margin-bottom: 0.25rem;">${alert.message}</div>
-      ${!alert.acknowledged ? `
-        <button class="btn btn-secondary btn-sm" style="font-size: 0.7rem; padding: 0.1rem 0.3rem; align-self: flex-end;" onclick="ackAlert('${alert.id}')">Acknowledge</button>
-      ` : ''}
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.25rem;">
+        <span style="font-size: 0.7rem; color: var(--primary); text-decoration: underline;">Investigate Timeline</span>
+        ${!alert.acknowledged ? `
+          <button class="btn btn-secondary btn-sm" style="font-size: 0.7rem; padding: 0.1rem 0.3rem;" onclick="event.stopPropagation(); ackAlert('${alert.id}')">Acknowledge</button>
+        ` : ''}
+      </div>
     `;
+    item.addEventListener('click', () => {
+      openIncidentTimeline(alert.id);
+    });
     container.appendChild(item);
   });
 }
@@ -3030,3 +3037,74 @@ async function triggerRollback(targetId) {
     console.error('Error during rollback:', err);
   }
 }
+
+async function openIncidentTimeline(alertId) {
+  const modal = document.getElementById('incident-timeline-modal');
+  const closeBtn = document.getElementById('incident-modal-close-btn');
+  const eventsContainer = document.getElementById('incident-timeline-events');
+  const titleEl = document.getElementById('incident-modal-title');
+  const compEl = document.getElementById('incident-modal-component');
+  const sevEl = document.getElementById('incident-modal-severity');
+
+  if (!modal || !eventsContainer) return;
+
+  eventsContainer.innerHTML = '<div class="text-center text-muted" style="padding: 2rem;">Analyzing logs & compiling timeline events...</div>';
+  modal.style.display = 'flex';
+
+  const closeModal = () => { modal.style.display = 'none'; };
+  closeBtn.onclick = closeModal;
+  modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+
+  try {
+    const res = await fetch(`/api/incidents/analyze?alertId=${alertId}`);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    titleEl.textContent = data.title;
+    compEl.textContent = data.component;
+    
+    sevEl.textContent = data.severity.toUpperCase();
+    if (data.severity === 'critical') {
+      sevEl.className = 'badge offline';
+      sevEl.style.background = 'rgba(239,68,68,0.1)';
+      sevEl.style.color = 'var(--danger)';
+    } else {
+      sevEl.className = 'badge warning';
+      sevEl.style.background = 'rgba(245,158,11,0.1)';
+      sevEl.style.color = 'var(--warning)';
+    }
+
+    eventsContainer.innerHTML = '';
+    data.events.forEach(evt => {
+      const card = document.createElement('div');
+      card.className = 'timeline-event-card';
+      card.style.position = 'relative';
+      card.style.background = 'rgba(255,255,255,0.02)';
+      card.style.border = '1px solid rgba(255,255,255,0.05)';
+      card.style.borderRadius = '8px';
+      card.style.padding = '1rem';
+      card.style.marginLeft = '1rem';
+
+      let typeBadge = `<span class="badge" style="background:${evt.color}20; color:${evt.color}; border: 1px solid ${evt.color}30; text-transform:uppercase; font-size:0.65rem;">${evt.type}</span>`;
+
+      const tStr = new Date(evt.timestamp).toLocaleTimeString();
+
+      card.innerHTML = `
+        <div class="timeline-dot" style="position:absolute; left:-2.45rem; top:1.25rem; width:14px; height:14px; border-radius:50%; background:${evt.color}; box-shadow: 0 0 10px ${evt.color}; border:2px solid var(--bg-primary);"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+          <h4 style="margin:0; font-size:0.9rem; color:#fff;">${evt.title}</h4>
+          <span style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${tStr}</span>
+        </div>
+        <p style="margin:0; font-size:0.82rem; color:var(--text-secondary); line-height:1.4;">${evt.description}</p>
+        <div style="margin-top:0.6rem; display:flex; align-items:center; gap:0.5rem;">
+          ${typeBadge}
+        </div>
+      `;
+      eventsContainer.appendChild(card);
+    });
+
+  } catch (err) {
+    eventsContainer.innerHTML = '<div class="text-center text-muted" style="padding: 2rem; color:var(--danger);">Failed to auto-generate incident timeline.</div>';
+  }
+}
+

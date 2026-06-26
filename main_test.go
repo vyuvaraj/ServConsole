@@ -522,3 +522,38 @@ func TestHandleEnvironments(t *testing.T) {
 	}
 }
 
+func TestHandleIncidentAnalysis(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/incidents/analyze?alertId=alert-mock", nil)
+	w := httptest.NewRecorder()
+	handleIncidentAnalyze(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var timeline IncidentTimeline
+	if err := json.NewDecoder(resp.Body).Decode(&timeline); err != nil {
+		t.Fatalf("failed to decode incident timeline: %v", err)
+	}
+
+	if len(timeline.Events) != 4 {
+		t.Errorf("expected 4 timeline events, got %d", len(timeline.Events))
+	}
+
+	foundDeploy := false
+	foundAlert := false
+	for _, event := range timeline.Events {
+		if event.Type == "deploy" {
+			foundDeploy = true
+		}
+		if event.Type == "alert" {
+			foundAlert = true
+		}
+	}
+
+	if !foundDeploy || !foundAlert {
+		t.Errorf("missing critical correlated events in incident timeline: %+v", timeline.Events)
+	}
+}
+

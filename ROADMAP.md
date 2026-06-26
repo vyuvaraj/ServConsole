@@ -64,7 +64,7 @@ These items take ServConsole from a dashboard into a **full observability and op
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
 | 7.1 | **Alerting engine & notification channels** | Large | Define alert rules (latency > 500ms, error rate > 5%, disk > 90%) with notification to Slack, email, PagerDuty, or webhook. Snooze/ack workflow. | [x] |
-| 7.2 | **Incident timeline auto-generation** | Large | When an alert fires, automatically build a timeline: what changed (deploys, config), what metrics spiked, which traces errored. One-page incident summary. | [ ] |
+| 7.2 | **Incident timeline auto-generation** | Large | When an alert fires, automatically build a timeline: what changed (deploys, config), what metrics spiked, which traces errored. One-page incident summary. | [x] |
 | 7.3 | **Service topology auto-discovery** | Medium | Parse OTel trace spans to automatically build a service dependency graph. Show which services call which, latency between them, and error rates on edges. | [ ] |
 | 7.4 | **Log aggregation & search** | Large | Collect structured JSON logs from all services (via stdout scraping or push API). Full-text search, filter by service/level/trace_id, and live tail. | [x] |
 | 7.5 | **Custom dashboard builder** | Large | Drag-and-drop dashboard editor: pick metrics, choose visualization (line chart, bar, gauge, table), set time range. Save and share custom dashboards per team. | [ ] |

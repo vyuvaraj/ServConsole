@@ -1147,6 +1147,35 @@
       </form>
     </div>
   </div>
+
+  <!-- Incident Timeline Modal -->
+  <div class="modal-backdrop" id="incident-timeline-modal" style="display: none;">
+    <div class="modal glass-card" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3 id="incident-modal-title">Incident Analysis</h3>
+        <button class="modal-close" id="incident-modal-close-btn">&times;</button>
+      </div>
+      <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; background: rgba(255,255,255,0.02); padding: 0.75rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+          <div>
+            <span style="color:var(--text-secondary);">Target Service:</span>
+            <strong id="incident-modal-component" style="margin-left:0.5rem; color:#fff;">-</strong>
+          </div>
+          <div>
+            <span style="color:var(--text-secondary);">Severity:</span>
+            <span class="badge" id="incident-modal-severity" style="margin-left:0.5rem;">-</span>
+          </div>
+        </div>
+
+        <div style="position: relative; margin-top: 1.5rem; padding-left: 2rem;" class="incident-timeline-container">
+          <div class="timeline-line"></div>
+          <div id="incident-timeline-events" style="display: flex; flex-direction: column; gap: 1.5rem;">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
   <!-- Login Screen Overlay -->
   <div id="login-screen" class="login-overlay" style="display: none;">
     <div class="login-card glass-card">

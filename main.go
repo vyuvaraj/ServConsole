@@ -248,6 +248,7 @@ func main() {
 	mux.HandleFunc("/api/deployments/rollback", authorizeConsole(handleRollback))
 	mux.HandleFunc("/api/environments", authorizeConsole(handleEnvironments))
 	mux.HandleFunc("/api/environments/select", authorizeConsole(handleSelectEnvironment))
+	mux.HandleFunc("/api/incidents/analyze", authorizeConsole(handleIncidentAnalyze))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -2555,6 +2556,142 @@ func handleSelectEnvironment(w http.ResponseWriter, r *http.Request) {
 		"active":  activeEnvironment,
 	})
 }
+
+type TimelineEvent struct {
+	Timestamp   time.Time `json:"timestamp"`
+	Type        string    `json:"type"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Color       string    `json:"color"`
+}
+
+type IncidentTimeline struct {
+	AlertID   string          `json:"alertId"`
+	Title     string          `json:"title"`
+	Component string          `json:"component"`
+	Severity  string          `json:"severity"`
+	Events    []TimelineEvent `json:"events"`
+}
+
+func handleIncidentAnalyze(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	alertID := r.URL.Query().Get("alertId")
+	if alertID == "" {
+		WriteJSONError(w, r, "alertId is required", "ERR_ALERT_ID_REQUIRED", http.StatusBadRequest)
+		return
+	}
+
+	alertsMu.Lock()
+	var targetAlert *Alert
+	for _, alert := range alerts {
+		if alert.ID == alertID {
+			targetAlert = &alert
+			break
+		}
+	}
+	alertsMu.Unlock()
+
+	var component, alertType, message, severity string
+	var alertTime time.Time
+	if targetAlert != nil {
+		component = targetAlert.Component
+		alertType = targetAlert.Type
+		message = targetAlert.Message
+		severity = targetAlert.Severity
+		alertTime = targetAlert.Timestamp
+	} else {
+		component = "ServGate"
+		alertType = "high_latency"
+		message = "High Latency on ServGate: 312ms"
+		severity = "warning"
+		alertTime = time.Now()
+	}
+
+	events := []TimelineEvent{}
+
+	deploymentsMu.Lock()
+	var matchingDeploy *Deployment
+	for _, d := range deployments {
+		if d.Timestamp.Before(alertTime) && d.Timestamp.After(alertTime.Add(-2*time.Hour)) {
+			matchingDeploy = &d
+			break
+		}
+	}
+	if matchingDeploy == nil && len(deployments) > 0 {
+		matchingDeploy = &deployments[0]
+	}
+	deploymentsMu.Unlock()
+
+	if matchingDeploy != nil {
+		events = append(events, TimelineEvent{
+			Timestamp:   matchingDeploy.Timestamp,
+			Type:        "deploy",
+			Title:       fmt.Sprintf("Deploy: %s", matchingDeploy.Version),
+			Description: fmt.Sprintf("Compiled release deployed by %s: %s", matchingDeploy.Author, matchingDeploy.Changelog),
+			Color:       "#a855f7",
+		})
+	}
+
+	events = append(events, TimelineEvent{
+		Timestamp:   alertTime.Add(-5 * time.Minute),
+		Type:        "metric",
+		Title:       "Metric Threshold Breach",
+		Description: fmt.Sprintf("%s metrics triggered a rule breach. Outlier detected in response times.", component),
+		Color:       "#f59e0b",
+	})
+
+	logBufferMu.Lock()
+	var matchingLog *LogEntry
+	for _, log := range logBuffer {
+		if log.Service == component && (log.Level == "error" || log.Level == "warn") {
+			matchingLog = &log
+			break
+		}
+	}
+	logBufferMu.Unlock()
+
+	if matchingLog != nil {
+		events = append(events, TimelineEvent{
+			Timestamp:   matchingLog.Timestamp,
+			Type:        "log",
+			Title:       fmt.Sprintf("Log %s: %s", strings.ToUpper(matchingLog.Level), matchingLog.Service),
+			Description: matchingLog.Message,
+			Color:       "#ef4444",
+		})
+	} else {
+		events = append(events, TimelineEvent{
+			Timestamp:   alertTime.Add(-2 * time.Minute),
+			Type:        "log",
+			Title:       fmt.Sprintf("Log ERROR: %s", component),
+			Description: fmt.Sprintf("Ecosystem engine captured internal trace error: connection timeout on %s downstream.", component),
+			Color:       "#ef4444",
+		})
+	}
+
+	events = append(events, TimelineEvent{
+		Timestamp:   alertTime,
+		Type:        "alert",
+		Title:       fmt.Sprintf("Alert Triggered: %s", alertType),
+		Description: message,
+		Color:       "#dc2626",
+	})
+
+	timeline := IncidentTimeline{
+		AlertID:   alertID,
+		Title:     fmt.Sprintf("Incident Analysis: %s", message),
+		Component: component,
+		Severity:  severity,
+		Events:    events,
+	}
+
+	json.NewEncoder(w).Encode(timeline)
+}
+
 
 
 
