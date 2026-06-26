@@ -822,11 +822,12 @@ func validateJWT(tokenStr string, secret []byte) (string, string, bool) {
 
 	role := claims.Role
 	if role == "" {
-		if claims.Username == "admin" {
+		switch claims.Username {
+		case "admin":
 			role = "admin"
-		} else if claims.Username == "operator" || claims.Username == "developer-bob" {
+		case "operator", "developer-bob":
 			role = "operator"
-		} else {
+		default:
 			role = "viewer"
 		}
 	}
@@ -896,9 +897,10 @@ func initOIDC() {
 
 func generateLocalJWT(username string) (string, error) {
 	role := "viewer"
-	if username == "admin" {
+	switch username {
+	case "admin":
 		role = "admin"
-	} else if username == "operator" || username == "developer-bob" {
+	case "operator", "developer-bob":
 		role = "operator"
 	}
 	header := base64UrlEncode([]byte(`{"alg":"HS256","typ":"JWT"}`))
