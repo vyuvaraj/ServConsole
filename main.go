@@ -141,7 +141,7 @@ type ComponentStatus struct {
 	Name      string    `json:"name"`
 	Online    bool      `json:"online"`
 	Url       string    `json:"url"`
-	LatencyMs int64     `json:"latency_ms,omitempty"`
+	LatencyMs int64     `json:"latency_ms"`
 	Details   any       `json:"details,omitempty"`
 }
 
@@ -405,12 +405,12 @@ func checkStatus(name string, baseUrl string) ComponentStatus {
 		return ComponentStatus{Name: name, Online: false, Url: baseUrl}
 	}
 
-	// Propagate default credentials for internal check
-	switch name {
-	case "ServGate":
-		req.Header.Set("Authorization", "Bearer "+*authToken)
-	case "ServQueue":
-		req.Header.Set("Authorization", "Bearer secret-token")
+	// Propagate credentials for internal check (only if JWT is configured)
+	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		if svcToken != "" {
+			req.Header.Set("Authorization", "Bearer "+svcToken)
+		}
 	}
 
 	start := time.Now()
@@ -447,11 +447,11 @@ func checkStatus(name string, baseUrl string) ComponentStatus {
 		detUrl := fmt.Sprintf("%s%s", strings.TrimSuffix(baseUrl, "/"), detailsPath)
 		dreq, derr := http.NewRequest("GET", detUrl, nil)
 		if derr == nil {
-			switch name {
-			case "ServGate":
-				dreq.Header.Set("Authorization", "Bearer "+*authToken)
-			case "ServQueue":
-				dreq.Header.Set("Authorization", "Bearer secret-token")
+			if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+				svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+				if svcToken != "" {
+					dreq.Header.Set("Authorization", "Bearer "+svcToken)
+				}
 			}
 			dresp, derr2 := client.Do(dreq)
 			if derr2 == nil {

@@ -119,7 +119,7 @@ function initPolling() {
       data.components.forEach(comp => {
         STATE.components[comp.name] = {
           online: comp.online,
-          latency: comp.latency_ms,
+          latency: comp.latency_ms || 0,
           details: comp.details
         };
       });
