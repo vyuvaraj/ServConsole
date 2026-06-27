@@ -436,15 +436,16 @@ async function fetchBuckets() {
     const containers = document.getElementById('buckets-container');
     containers.innerHTML = '';
     
-    // Fetch actual bucket list from ServStore
+    // Fetch actual bucket list from ServStore (returns S3 XML)
     const provRes = await fetch('/api/proxy/store/');
     let bucketList = [];
     if (provRes.ok) {
-      const data = await provRes.json();
-      bucketList = data.Buckets || data.buckets || data || [];
-      if (Array.isArray(bucketList) && bucketList.length > 0 && typeof bucketList[0] === 'object') {
-        bucketList = bucketList.map(b => b.Name || b.name || b);
-      }
+      const text = await provRes.text();
+      // Parse S3 XML response
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      const bucketEls = xml.querySelectorAll('Bucket > Name');
+      bucketEls.forEach(el => bucketList.push(el.textContent));
     }
     
     if (bucketList.length === 0) {
@@ -482,22 +483,27 @@ async function fetchObjects(bucket) {
       tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">Bucket is empty or not accessible</td></tr>`;
       return;
     }
-    const data = await res.json();
-    const objects = data.Contents || data.objects || [];
+    const text = await res.text();
+    
+    // Parse S3 XML response
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'text/xml');
+    const contents = xml.querySelectorAll('Contents');
     
     tbody.innerHTML = '';
-    if (objects.length === 0) {
+    if (contents.length === 0) {
       tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No objects in this bucket</td></tr>`;
       return;
     }
-    objects.forEach(obj => {
-      const tr = document.createElement('tr');
-      const size = obj.Size || obj.size || 0;
+    contents.forEach(item => {
+      const key = item.querySelector('Key')?.textContent || '';
+      const size = parseInt(item.querySelector('Size')?.textContent || '0');
+      const modified = item.querySelector('LastModified')?.textContent || '';
       const sizeStr = size > 1048576 ? `${(size / 1048576).toFixed(1)} MB` : size > 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`;
-      const modified = obj.LastModified || obj.last_modified || '';
       const modStr = modified ? new Date(modified).toLocaleString() : '—';
+      const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td style="font-family:var(--font-mono);">${obj.Key || obj.key || ''}</td>
+        <td style="font-family:var(--font-mono);">${key}</td>
         <td>${sizeStr}</td>
         <td>${modStr}</td>
       `;
