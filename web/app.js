@@ -29,14 +29,14 @@ document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   checkAuthConfig();
   initTabs();
-  initForms();
+  try { initForms(); } catch(e) { console.warn('initForms:', e); }
   initPolling();
   initRingCanvas();
-  initAuditLogsUI();
+  try { initAuditLogsUI(); } catch(e) { console.warn('initAuditLogsUI:', e); }
   initAlertsUI();
   initLogsUI();
   initMobileMenu();
-  initEnvironmentSelector();
+  try { initEnvironmentSelector(); } catch(e) { console.warn('initEnv:', e); }
 });
 
 function initTheme() {
@@ -623,15 +623,18 @@ function initRingCanvas() {
 function initForms() {
   // Modal toggle
   const modal = document.getElementById('add-route-modal');
-  document.getElementById('btn-add-route').addEventListener('click', () => {
-    modal.classList.add('active');
-  });
-  document.getElementById('modal-close-btn').addEventListener('click', () => {
-    modal.classList.remove('active');
-  });
+  const addRouteBtn = document.getElementById('btn-add-route');
+  const modalCloseBtn = document.getElementById('modal-close-btn');
+  if (addRouteBtn && modal) {
+    addRouteBtn.addEventListener('click', () => { modal.classList.add('active'); });
+  }
+  if (modalCloseBtn && modal) {
+    modalCloseBtn.addEventListener('click', () => { modal.classList.remove('active'); });
+  }
   
   // Register API Route
-  document.getElementById('add-route-form').addEventListener('submit', async (e) => {
+  const addRouteForm = document.getElementById('add-route-form');
+  if (addRouteForm) addRouteForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const prefix = document.getElementById('route-prefix').value;
     const target = document.getElementById('route-target').value;
@@ -663,7 +666,8 @@ function initForms() {
   });
 
   // Hot-swap WASM Middleware
-  document.getElementById('wasm-upload-form').addEventListener('submit', async (e) => {
+  const wasmForm = document.getElementById('wasm-upload-form');
+  if (wasmForm) wasmForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fileInput = document.getElementById('wasm-file-input');
     const nameInput = document.getElementById('wasm-name-input');
@@ -707,7 +711,8 @@ function initForms() {
   });
 
   // Attach Queue transform
-  document.getElementById('queue-transform-form').addEventListener('submit', async (e) => {
+  const queueTransformForm = document.getElementById('queue-transform-form');
+  if (queueTransformForm) queueTransformForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const topic = document.getElementById('transform-topic').value.trim();
     const fileInput = document.getElementById('transform-file');
@@ -741,7 +746,8 @@ function initForms() {
   });
 
   // Publish STOMP Message
-  document.getElementById('publish-message-form').addEventListener('submit', async (e) => {
+  const publishForm = document.getElementById('publish-message-form');
+  if (publishForm) publishForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const topic = document.getElementById('pub-topic').value;
     const payload = document.getElementById('pub-payload').value;
@@ -771,7 +777,8 @@ function initForms() {
   });
 
   // Hash Ring Placement Trace Checker
-  document.getElementById('btn-check-placement').addEventListener('click', async () => {
+  const placementBtn = document.getElementById('btn-check-placement');
+  if (placementBtn) placementBtn.addEventListener('click', async () => {
     const bucket = document.getElementById('placement-bucket').value.trim();
     const key = document.getElementById('placement-key').value.trim();
     const resultBox = document.getElementById('placement-result');
@@ -798,17 +805,17 @@ function initForms() {
   });
   
   // Telemetry triggers
-  document.getElementById('btn-refresh-traces').addEventListener('click', fetchTraces);
-  document.getElementById('btn-refresh-graph').addEventListener('click', fetchDependencyGraph);
+  document.getElementById('btn-refresh-traces')?.addEventListener('click', fetchTraces);
+  document.getElementById('btn-refresh-graph')?.addEventListener('click', fetchDependencyGraph);
   document.getElementById('btn-clear-traces')?.addEventListener('click', clearTraces);
   document.getElementById('trace-search')?.addEventListener('input', filterTraces);
-  document.getElementById('btn-clear-logs').addEventListener('click', () => {
+  document.getElementById('btn-clear-logs')?.addEventListener('click', () => {
     document.getElementById('console-logs-screen').innerHTML = '';
   });
 
   // Queue WAL & Delayed triggers
-  document.getElementById('btn-refresh-wal').addEventListener('click', fetchWAL);
-  document.getElementById('btn-refresh-delayed').addEventListener('click', fetchDelayedMessages);
+  document.getElementById('btn-refresh-wal')?.addEventListener('click', fetchWAL);
+  document.getElementById('btn-refresh-delayed')?.addEventListener('click', fetchDelayedMessages);
 
   // Create Bucket Modal
   const bucketModal = document.getElementById('create-bucket-modal');
