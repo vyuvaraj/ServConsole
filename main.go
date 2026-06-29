@@ -2094,6 +2094,14 @@ func handleIngestLog(w http.ResponseWriter, r *http.Request) {
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now()
 	}
+	
+	// Scan for circuit breaker trips to raise system alerts
+	if strings.Contains(strings.ToLower(entry.Message), "circuit_breaker") || strings.Contains(strings.ToLower(entry.Message), "circuit breaker") {
+		alertsMu.Lock()
+		addOrUpdateAlert(entry.Service, "circuit_breaker", entry.Message, "warning")
+		alertsMu.Unlock()
+	}
+
 	logBufferMu.Lock()
 	if len(logBuffer) >= maxLogLimit {
 		logBuffer = logBuffer[1:]
