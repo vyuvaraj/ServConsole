@@ -2105,7 +2105,14 @@ function renderSpanNodeWaterfall(container, node, totalDuration, depth) {
   
   const service = (node.span.service || 'unknown').toLowerCase();
   const serviceClass = `waterfall-span-service service-${service}`;
-  const barClass = `waterfall-bar waterfall-bar-${service} ${node.span.status === 2 ? 'error' : 'success'}`;
+  
+  const isSlowQuery = node.span.attributes && (node.span.attributes['db.slow_query'] === true || node.span.attributes['db.slow_query'] === "true");
+  const barClass = `waterfall-bar waterfall-bar-${service} ${node.span.status === 2 ? 'error' : (isSlowQuery ? 'success warning-bar' : 'success')}`;
+  
+  let slowQueryWarning = '';
+  if (isSlowQuery) {
+    slowQueryWarning = `<span class="badge warning" style="font-size:0.65rem; padding:0.15rem 0.3rem; margin-left:4px; font-weight:bold; font-family:var(--font-mono);">⚠️ SLOW QUERY</span>`;
+  }
   
   // Calculate width and offset %
   const pctWidth = totalDuration > 0 ? (node.durationMs / totalDuration) * 100 : 100;
@@ -2129,6 +2136,7 @@ function renderSpanNodeWaterfall(container, node, totalDuration, depth) {
         ${toggleBtnHtml}
         <span class="${serviceClass}">${escapeHtml(node.span.service || 'unknown')}</span>
         <span class="waterfall-span-name" title="${escapeHtml(node.span.name)}">${escapeHtml(node.span.name)}</span>
+        ${slowQueryWarning}
         ${hasAttributes ? `<span style="font-size:0.75rem; cursor:pointer; color:var(--primary);" onclick="toggleSpanAttr('${uniqueId}')">ⓘ</span>` : ''}
       </div>
       <div class="waterfall-timeline-track">

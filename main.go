@@ -2101,6 +2101,13 @@ func handleIngestLog(w http.ResponseWriter, r *http.Request) {
 		addOrUpdateAlert(entry.Service, "circuit_breaker", entry.Message, "warning")
 		alertsMu.Unlock()
 	}
+	
+	// Scan for database slow queries to raise system alerts
+	if strings.Contains(strings.ToLower(entry.Message), "database_alert") || strings.Contains(strings.ToLower(entry.Message), "database alert") || strings.Contains(entry.Message, "[DATABASE_ALERT]") {
+		alertsMu.Lock()
+		addOrUpdateAlert(entry.Service, "slow_query", entry.Message, "warning")
+		alertsMu.Unlock()
+	}
 
 	logBufferMu.Lock()
 	if len(logBuffer) >= maxLogLimit {
