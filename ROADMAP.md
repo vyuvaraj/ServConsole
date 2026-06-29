@@ -96,5 +96,23 @@ These create a **moat** around ServConsole — capabilities that Grafana, Datado
 | 8.9 | **Embedded WASM transform debugger** | Large | Step through WASM transform execution in the browser — set breakpoints, inspect intermediate message state, replay transforms with modified inputs. Debug queue transforms without leaving the console. | WASM + wazero = inspectable execution. No other dashboard can debug middleware at the instruction level. |
 | 8.10 | **Single binary, zero-dependency deployment** | Already Done | The entire console (Go backend + embedded web assets) is one binary. No Docker, no nginx, no Node.js, no database for the dashboard itself. Copy + run. | Grafana requires: PostgreSQL/SQLite + provisioning YAML + plugin installs. Datadog is SaaS-only. ServConsole = one file. |
 
+---
+
+### Phase 9: New Component Integration Panels (Proposed — 2027)
+
+UI panels for managing the proposed Servverse components (ServAuth, ServDB, ServMail, ServFlow) directly from the console.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 9.1 | **ServAuth User Management** | Medium | User directory browser — CRUD users, assign roles, view sessions, force logout. Password reset triggers. Social login provider configuration. | [ ] |
+| 9.2 | **ServAuth OAuth2 Client Registry** | Small | Register and manage OAuth2 clients (client_id, redirect URIs, scopes). Issue/revoke API keys. | [ ] |
+| 9.3 | **ServDB Connection Pool Dashboard** | Medium | Real-time pool utilization, active queries, slow query log, deadlock alerts. Per-service breakdown. | [ ] |
+| 9.4 | **ServDB Migration Manager** | Medium | View pending migrations, run/rollback migrations, schema diff visualization. | [ ] |
+| 9.5 | **ServMail Delivery Dashboard** | Medium | Send/bounce/complaint rates, delivery timeline, template preview editor. | [ ] |
+| 9.6 | **ServMail Template Editor** | Medium | WYSIWYG email template editor with variable injection preview and version history. | [ ] |
+| 9.7 | **ServFlow Workflow Visualizer** | Large | Interactive DAG view of running workflows. Step status (pending/running/completed/failed). Click to inspect state. | [ ] |
+| 9.8 | **ServFlow Approval Queue** | Medium | Human approval gate UI — list pending approvals, approve/reject with comment, audit trail. | [ ] |
+| 9.9 | **ServFlow Execution History** | Medium | Searchable history of workflow executions with duration, outcome, and step-by-step replay. | [ ] |
+
 > See [UNIFIED_ROADMAP.md](../../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
