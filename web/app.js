@@ -89,6 +89,14 @@ function initTabs() {
       } else if (tabId === 'database') {
         fetchDatabaseSchemas();
         fetchMigrations();
+        fetchDbHealth();
+      } else if (tabId === 'auth') {
+        fetchAuthUsers();
+        fetchAuthSessions();
+      } else if (tabId === 'mail') {
+        fetchMailDashboard();
+        fetchMailAttachments();
+        fetchMailPreferences();
       } else if (tabId === 'policies') {
         loadPoliciesView();
       } else if (tabId === 'cost') {
@@ -3854,3 +3862,213 @@ window.deleteDashboard = deleteDashboard;
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(initDashboards, 500);
 });
+
+// --- Database Health Telemetry ---
+async function fetchDbHealth() {
+  try {
+    const res = await fetch('/api/proxy/db/api/db/health');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    
+    const deadlockIndicator = document.getElementById('db-deadlock-indicator');
+    if (deadlockIndicator) {
+      if (data.deadlock_alert) {
+        deadlockIndicator.className = 'badge badge-danger';
+        deadlockIndicator.textContent = 'DEADLOCK ALARM ⚠️';
+      } else {
+        deadlockIndicator.className = 'badge badge-success';
+        deadlockIndicator.textContent = 'Pools Healthy';
+      }
+    }
+    
+    const pActive = document.getElementById('db-primary-active');
+    const pMax = document.getElementById('db-primary-max');
+    const pQueries = document.getElementById('db-primary-queries');
+    if (data.pools && data.pools.primary) {
+      if (pActive) pActive.textContent = data.pools.primary.active_connections;
+      if (pMax) pMax.textContent = data.pools.primary.max_connections;
+      if (pQueries) pQueries.textContent = data.pools.primary.total_queries || 0;
+    }
+    
+    const rActive = document.getElementById('db-replica-active');
+    const rMax = document.getElementById('db-replica-max');
+    const rQueries = document.getElementById('db-replica-queries');
+    if (data.pools && data.pools.replica) {
+      if (rActive) rActive.textContent = data.pools.replica.active_connections;
+      if (rMax) rMax.textContent = data.pools.replica.max_connections;
+      if (rQueries) rQueries.textContent = data.pools.replica.total_queries || 0;
+    }
+  } catch (err) {
+    console.error('Failed to fetch DB Health:', err);
+  }
+}
+window.fetchDbHealth = fetchDbHealth;
+
+// --- Identity (ServAuth) ---
+async function fetchAuthUsers() {
+  try {
+    const res = await fetch('/api/proxy/auth/api/auth/users');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const users = await res.json();
+    
+    const countBadge = document.getElementById('auth-users-count');
+    if (countBadge) countBadge.textContent = `${users.length} Users`;
+    
+    const list = document.getElementById('auth-users-list');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (users.length === 0) {
+      list.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No users registered yet.</td></tr>`;
+      return;
+    }
+    
+    users.forEach(u => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(u.username)}</strong></td>
+        <td>${escapeHtml(u.email)}</td>
+        <td><span class="badge">${escapeHtml(u.tenant_id)}</span></td>
+        <td><span class="badge ${u.mfa_enabled ? 'badge-success' : 'badge-secondary'}">${u.mfa_enabled ? 'Enabled' : 'Disabled'}</span></td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch Auth users:', err);
+  }
+}
+window.fetchAuthUsers = fetchAuthUsers;
+
+async function fetchAuthSessions() {
+  try {
+    const res = await fetch('/api/proxy/auth/api/auth/sessions');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const sessions = await res.json();
+    
+    const list = document.getElementById('auth-sessions-list');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (!sessions || sessions.length === 0) {
+      list.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No active sessions.</td></tr>`;
+      return;
+    }
+    
+    sessions.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><code style="font-size:0.75rem;">${escapeHtml(s.token.substring(0, 10))}...</code></td>
+        <td>${new Date(s.expires_at).toLocaleTimeString()}</td>
+        <td><span class="badge badge-success">Active</span></td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch Auth sessions:', err);
+  }
+}
+window.fetchAuthSessions = fetchAuthSessions;
+
+// KMS encrypt action
+document.addEventListener('DOMContentLoaded', () => {
+  const encryptBtn = document.getElementById('btn-kms-encrypt');
+  if (encryptBtn) {
+    encryptBtn.addEventListener('click', async () => {
+      const plaintext = document.getElementById('auth-kms-plaintext').value;
+      try {
+        const res = await fetch('/api/proxy/auth/api/auth/secrets/encrypt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plaintext })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        document.getElementById('auth-kms-ciphertext').value = data.ciphertext;
+      } catch (err) {
+        alert('KMS Encryption failed: ' + err.message);
+      }
+    });
+  }
+});
+
+// --- Notifications (ServMail) ---
+async function fetchMailDashboard() {
+  try {
+    const res = await fetch('/api/proxy/mail/api/mail/dashboard');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    
+    const total = document.getElementById('mail-stat-total');
+    const sent = document.getElementById('mail-stat-sent');
+    const opened = document.getElementById('mail-stat-opened');
+    const bounced = document.getElementById('mail-stat-bounced');
+    
+    if (total) total.textContent = data.total_messages;
+    if (sent) sent.textContent = data.sent;
+    if (opened) opened.textContent = data.opened;
+    if (bounced) bounced.textContent = data.bounced;
+  } catch (err) {
+    console.error('Failed to fetch Mail dashboard:', err);
+  }
+}
+window.fetchMailDashboard = fetchMailDashboard;
+
+async function fetchMailAttachments() {
+  try {
+    const res = await fetch('/api/proxy/mail/api/mail/attachments');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const listData = await res.json();
+    
+    const list = document.getElementById('mail-attachments-list');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (!listData || listData.length === 0) {
+      list.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No attachments uploaded yet.</td></tr>`;
+      return;
+    }
+    
+    listData.forEach(a => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(a.filename)}</strong></td>
+        <td>${a.size_bytes}</td>
+        <td><span class="badge ${a.storage === 'cold' ? 'badge-secondary' : 'badge-success'}">${escapeHtml(a.storage)}</span></td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch Mail attachments:', err);
+  }
+}
+window.fetchMailAttachments = fetchMailAttachments;
+
+async function fetchMailPreferences() {
+  try {
+    const res = await fetch('/api/proxy/mail/api/mail/preferences');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const prefs = await res.json();
+    
+    const list = document.getElementById('mail-preferences-list');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (!prefs || prefs.length === 0) {
+      list.innerHTML = `<tr><td colspan="2" class="text-center text-muted">No preference updates logged yet.</td></tr>`;
+      return;
+    }
+    
+    prefs.forEach(p => {
+      const optedOuts = Object.keys(p.opted_out || {}).filter(k => p.opted_out[k]);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><code>${escapeHtml(p.recipient)}</code></td>
+        <td>${optedOuts.length > 0 ? optedOuts.map(o => `<span class="badge badge-danger" style="margin-right:0.25rem;">${escapeHtml(o)}</span>`).join('') : '<span class="text-muted">None (All Opted In)</span>'}</td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch Mail preferences:', err);
+  }
+}
+window.fetchMailPreferences = fetchMailPreferences;

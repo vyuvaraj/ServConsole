@@ -37,6 +37,9 @@ var (
 	queueUrl   = flag.String("queue-url", "http://localhost:8082", "ServQueue base URL")
 	traceUrl   = flag.String("trace-url", "http://localhost:8090", "ServTrace base URL")
 	tunnelUrl  = flag.String("tunnel-url", "http://localhost:8443", "ServTunnel base URL")
+	authUrl    = flag.String("auth-url", "http://localhost:8098", "ServAuth base URL")
+	dbUrl      = flag.String("db-url", "http://localhost:8097", "ServDB base URL")
+	mailUrl    = flag.String("mail-url", "http://localhost:8094", "ServMail base URL")
 	authToken  = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
 	gateConfig = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
 )
@@ -207,12 +210,28 @@ func main() {
 		log.Fatalf("Invalid tunnel-url: %v", err)
 	}
 
+	aURL, err := url.Parse(*authUrl)
+	if err != nil {
+		log.Fatalf("Invalid auth-url: %v", err)
+	}
+	dURL, err := url.Parse(*dbUrl)
+	if err != nil {
+		log.Fatalf("Invalid db-url: %v", err)
+	}
+	mURL, err := url.Parse(*mailUrl)
+	if err != nil {
+		log.Fatalf("Invalid mail-url: %v", err)
+	}
+
 	// Create reverse proxies
 	gateProxy := httputil.NewSingleHostReverseProxy(gURL)
 	storeProxy := httputil.NewSingleHostReverseProxy(sURL)
 	queueProxy := httputil.NewSingleHostReverseProxy(qURL)
 	traceProxy := httputil.NewSingleHostReverseProxy(tURL)
 	tunnelProxy := httputil.NewSingleHostReverseProxy(tunURL)
+	authProxy := httputil.NewSingleHostReverseProxy(aURL)
+	dbProxy := httputil.NewSingleHostReverseProxy(dURL)
+	mailProxy := httputil.NewSingleHostReverseProxy(mURL)
 
 	// Adjust Director to rewrite request path and set Authorization headers
 	configureProxyDirector(gateProxy, gURL, "/api/proxy/gate", *authToken)
@@ -220,6 +239,9 @@ func main() {
 	configureProxyDirector(queueProxy, qURL, "/api/proxy/queue", "secret-token")
 	configureProxyDirector(traceProxy, tURL, "/api/proxy/trace", "")
 	configureProxyDirector(tunnelProxy, tunURL, "/api/proxy/tunnel", "")
+	configureProxyDirector(authProxy, aURL, "/api/proxy/auth", "")
+	configureProxyDirector(dbProxy, dURL, "/api/proxy/db", "")
+	configureProxyDirector(mailProxy, mURL, "/api/proxy/mail", "")
 
 	mux := http.NewServeMux()
 
@@ -272,6 +294,9 @@ func main() {
 	mux.Handle("/api/proxy/queue/", authorizeConsole(checkProxyRBAC(queueProxy.ServeHTTP)))
 	mux.Handle("/api/proxy/trace/", authorizeConsole(traceProxy.ServeHTTP))
 	mux.Handle("/api/proxy/tunnel/", authorizeConsole(tunnelProxy.ServeHTTP))
+	mux.Handle("/api/proxy/auth/", authorizeConsole(authProxy.ServeHTTP))
+	mux.Handle("/api/proxy/db/", authorizeConsole(dbProxy.ServeHTTP))
+	mux.Handle("/api/proxy/mail/", authorizeConsole(mailProxy.ServeHTTP))
 
 	fileServer := http.FileServer(http.Dir("./web"))
 	mux.Handle("/", fileServer)
