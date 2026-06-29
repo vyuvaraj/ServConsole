@@ -3441,3 +3441,186 @@ async function executeTerminalCommand(cmd) {
   termBody.scrollTop = termBody.scrollHeight;
 }
 
+
+
+// --- Custom Dashboards ---
+let dashboards = JSON.parse(localStorage.getItem('servverse-dashboards') || '[]');
+let editingDashboard = null;
+
+function initDashboards() {
+  const createBtn = document.getElementById('btn-create-dashboard');
+  const addWidgetBtn = document.getElementById('btn-add-widget');
+  const saveBtn = document.getElementById('btn-save-dashboard');
+  
+  if (createBtn) createBtn.addEventListener('click', createNewDashboard);
+  if (addWidgetBtn) addWidgetBtn.addEventListener('click', addWidget);
+  if (saveBtn) saveBtn.addEventListener('click', saveDashboard);
+  
+  renderDashboardList();
+}
+
+function createNewDashboard() {
+  const name = prompt('Dashboard name:');
+  if (!name) return;
+  
+  editingDashboard = { id: Date.now().toString(), name, widgets: [] };
+  document.getElementById('dashboard-editor').style.display = 'block';
+  document.getElementById('dashboard-editor-title').textContent = name;
+  document.getElementById('dashboard-empty').style.display = 'none';
+  renderWidgets();
+}
+
+function addWidget() {
+  if (!editingDashboard) return;
+  
+  const widgetTypes = [
+    { type: 'metric', label: 'Single Metric (number)' },
+    { type: 'chart', label: 'Time-series Chart' },
+    { type: 'table', label: 'Data Table' },
+    { type: 'status', label: 'Service Status' }
+  ];
+  
+  const type = prompt('Widget type (metric/chart/table/status):', 'metric');
+  if (!type) return;
+  
+  const source = prompt('Data source (gate-latency/queue-messages/store-buckets/custom):', 'gate-latency');
+  if (!source) return;
+  
+  const title = prompt('Widget title:', source);
+  
+  editingDashboard.widgets.push({
+    id: Date.now().toString(),
+    type: type,
+    title: title || source,
+    source: source,
+    size: 'medium'
+  });
+  
+  renderWidgets();
+}
+
+function renderWidgets() {
+  const grid = document.getElementById('dashboard-widgets-grid');
+  if (!grid || !editingDashboard) return;
+  
+  grid.innerHTML = '';
+  if (editingDashboard.widgets.length === 0) {
+    grid.innerHTML = '<div class="text-center text-muted" style="grid-column:1/-1; padding:2rem 0;">Drag widgets here or click "+ Add Widget"</div>';
+    return;
+  }
+  
+  editingDashboard.widgets.forEach(widget => {
+    const card = document.createElement('div');
+    card.className = 'glass-card';
+    card.style.padding = '1rem';
+    card.style.position = 'relative';
+    
+    let valueHTML = '';
+    switch (widget.source) {
+      case 'gate-latency':
+        valueHTML = `<div style="font-size:2rem; font-weight:700; color:var(--primary);">${STATE.components.ServGate?.latency || 0} ms</div>`;
+        break;
+      case 'queue-messages':
+        valueHTML = `<div style="font-size:2rem; font-weight:700; color:var(--warning);">${STATE.components.ServQueue?.details?.metrics?.messages_published_total || 0}</div>`;
+        break;
+      case 'store-buckets':
+        valueHTML = `<div style="font-size:2rem; font-weight:700; color:var(--success);">—</div>`;
+        break;
+      default:
+        valueHTML = `<div style="font-size:2rem; font-weight:700; color:var(--secondary);">—</div>`;
+    }
+    
+    card.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+        <h4 style="margin:0; font-size:0.85rem; color:var(--text-secondary);">${widget.title}</h4>
+        <button onclick="removeWidget('${widget.id}')" style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:1.2rem;">×</button>
+      </div>
+      ${valueHTML}
+      <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">${widget.type} · ${widget.source}</div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function removeWidget(widgetId) {
+  if (!editingDashboard) return;
+  editingDashboard.widgets = editingDashboard.widgets.filter(w => w.id !== widgetId);
+  renderWidgets();
+}
+window.removeWidget = removeWidget;
+
+function saveDashboard() {
+  if (!editingDashboard) return;
+  
+  const idx = dashboards.findIndex(d => d.id === editingDashboard.id);
+  if (idx >= 0) {
+    dashboards[idx] = editingDashboard;
+  } else {
+    dashboards.push(editingDashboard);
+  }
+  
+  localStorage.setItem('servverse-dashboards', JSON.stringify(dashboards));
+  editingDashboard = null;
+  document.getElementById('dashboard-editor').style.display = 'none';
+  renderDashboardList();
+  logEvent('system', 'Dashboard saved successfully');
+}
+
+function renderDashboardList() {
+  const list = document.getElementById('dashboards-list');
+  const empty = document.getElementById('dashboard-empty');
+  if (!list) return;
+  
+  list.innerHTML = '';
+  
+  if (dashboards.length === 0) {
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  
+  dashboards.forEach(db => {
+    const card = document.createElement('div');
+    card.className = 'glass-card';
+    card.style.padding = '1.25rem';
+    card.style.cursor = 'pointer';
+    card.style.transition = 'all 0.2s';
+    
+    card.innerHTML = `
+      <h3 style="margin:0 0 0.5rem 0; font-size:1.1rem;">${db.name}</h3>
+      <p style="font-size:0.85rem; color:var(--text-secondary); margin:0;">${db.widgets.length} widget${db.widgets.length !== 1 ? 's' : ''}</p>
+      <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); editDashboard('${db.id}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteDashboard('${db.id}')">Delete</button>
+      </div>
+    `;
+    card.addEventListener('click', () => viewDashboard(db.id));
+    list.appendChild(card);
+  });
+}
+
+function editDashboard(id) {
+  editingDashboard = JSON.parse(JSON.stringify(dashboards.find(d => d.id === id)));
+  if (!editingDashboard) return;
+  document.getElementById('dashboard-editor').style.display = 'block';
+  document.getElementById('dashboard-editor-title').textContent = editingDashboard.name;
+  renderWidgets();
+}
+window.editDashboard = editDashboard;
+
+function viewDashboard(id) {
+  editDashboard(id); // For now, view = edit mode
+}
+
+function deleteDashboard(id) {
+  if (!confirm('Delete this dashboard?')) return;
+  dashboards = dashboards.filter(d => d.id !== id);
+  localStorage.setItem('servverse-dashboards', JSON.stringify(dashboards));
+  renderDashboardList();
+}
+window.deleteDashboard = deleteDashboard;
+
+// Initialize dashboards when tab is clicked
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(initDashboards, 500);
+});

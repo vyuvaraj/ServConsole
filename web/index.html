@@ -1191,6 +1191,62 @@
           </div>
         </div>
       </div>
+
+      <!-- TAB: LIVE TOPOLOGY -->
+      <div class="tab-pane" id="tab-topology">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Live Service Topology</h2>
+            </div>
+            <p class="section-desc">Real-time service connectivity map auto-discovered from OTel trace spans and ServMesh heartbeats.</p>
+            <div class="text-center text-muted" style="padding: 4rem 0;">
+              <p style="font-size:2rem; margin-bottom:1rem;">🌐</p>
+              <p>Topology data populates as services emit traces. Use the Dependency Graph tab for the force-directed view.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: CUSTOM DASHBOARDS -->
+      <div class="tab-pane" id="tab-dashboards">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Custom Dashboards</h2>
+              <button class="btn btn-primary" id="btn-create-dashboard">+ New Dashboard</button>
+            </div>
+            <p class="section-desc">Create custom monitoring dashboards with drag-and-drop metric widgets. Save and share per team.</p>
+
+            <div id="dashboards-list" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:1.5rem; margin-top:1.5rem;">
+              <!-- Dashboards rendered dynamically -->
+            </div>
+
+            <div id="dashboard-empty" class="text-center text-muted" style="padding:3rem 0;">
+              <p style="font-size:2rem; margin-bottom:1rem;">📊</p>
+              <p>No custom dashboards yet. Click "+ New Dashboard" to create one.</p>
+            </div>
+          </div>
+
+          <!-- Dashboard Editor (shown when editing) -->
+          <div class="card glass-card" id="dashboard-editor" style="display:none; margin-top:2rem;">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Dashboard Editor: <span id="dashboard-editor-title">Untitled</span></h2>
+              <div style="display:flex; gap:0.5rem;">
+                <button class="btn btn-secondary btn-sm" id="btn-add-widget">+ Add Widget</button>
+                <button class="btn btn-primary btn-sm" id="btn-save-dashboard">Save Dashboard</button>
+              </div>
+            </div>
+
+            <div id="dashboard-widgets-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:1rem; margin-top:1.5rem; min-height:200px; border:2px dashed rgba(255,255,255,0.08); border-radius:12px; padding:1rem;">
+              <div class="text-center text-muted" style="grid-column:1/-1; padding:2rem 0;">
+                Drag widgets here or click "+ Add Widget"
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </main>
   </div>
 
