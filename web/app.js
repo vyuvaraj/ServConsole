@@ -514,67 +514,6 @@ async function fetchObjects(bucket) {
   }
 }
 
-// --- Traces Tab: OpenTelemetry waterfall ---
-async function fetchTraces() {
-  const container = document.getElementById('traces-timeline');
-  container.innerHTML = `<p class="text-center">Fetching OpenTelemetry trace spans...</p>`;
-  
-  try {
-    const res = await fetch('/api/proxy/store/console/traces');
-    if (!res.ok) {
-      container.innerHTML = `<p class="text-center text-muted">OTel endpoints not responding</p>`;
-      return;
-    }
-    const spans = await res.json();
-    STATE.traces = spans || [];
-    
-    renderTracesTimeline();
-  } catch (err) {
-    container.innerHTML = `<p class="text-center text-danger">Error: ${err.message}</p>`;
-  }
-}
-
-function renderTracesTimeline() {
-  const container = document.getElementById('traces-timeline');
-  container.innerHTML = '';
-  
-  if (STATE.traces.length === 0) {
-    container.innerHTML = `<p class="text-center text-muted">No recent trace spans captured</p>`;
-    return;
-  }
-  
-  // Calculate relative widths based on latency
-  let maxDur = 1;
-  STATE.traces.forEach(s => {
-    if (s.DurationNs > maxDur) maxDur = s.DurationNs;
-  });
-  
-  STATE.traces.forEach(span => {
-    const row = document.createElement('div');
-    row.className = 'trace-span-row';
-    
-    const durMs = (span.DurationNs / 1000000).toFixed(2);
-    const widthPct = Math.max(2, (span.DurationNs / maxDur) * 100);
-    const startStr = new Date(span.StartTime).toLocaleTimeString();
-    
-    row.innerHTML = `
-      <div class="span-header">
-        <div>
-          <span class="span-name">${span.Name}</span>
-          <span class="span-service">${span.ServiceName || 'servstore'}</span>
-        </div>
-        <div style="font-family:var(--font-mono); font-size:0.75rem;">
-          ${durMs} ms <span style="color:var(--text-muted)">@ ${startStr}</span>
-        </div>
-      </div>
-      <div class="span-bar-wrapper">
-        <div class="span-bar" style="width: ${widthPct}%"></div>
-      </div>
-    `;
-    container.appendChild(row);
-  });
-}
-
 // --- Consistent Hash Ring Drawing ---
 function drawHashRing(ringData) {
   const canvas = document.getElementById('ring-canvas');
