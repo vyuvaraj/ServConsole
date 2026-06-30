@@ -2671,11 +2671,13 @@ type TimelineEvent struct {
 }
 
 type IncidentTimeline struct {
-	AlertID   string          `json:"alertId"`
-	Title     string          `json:"title"`
-	Component string          `json:"component"`
-	Severity  string          `json:"severity"`
-	Events    []TimelineEvent `json:"events"`
+	AlertID            string          `json:"alertId"`
+	Title              string          `json:"title"`
+	Component          string          `json:"component"`
+	Severity           string          `json:"severity"`
+	Events             []TimelineEvent `json:"events"`
+	AISuggestedRunbook string          `json:"ai_suggested_runbook,omitempty"`
+	AIRunbookSteps     []string        `json:"ai_runbook_steps,omitempty"`
 }
 
 func handleIncidentAnalyze(w http.ResponseWriter, r *http.Request) {
@@ -2786,12 +2788,40 @@ func handleIncidentAnalyze(w http.ResponseWriter, r *http.Request) {
 		Color:       "#dc2626",
 	})
 
+	var suggestedRunbook string
+	var runbookSteps []string
+	switch strings.ToLower(component) {
+	case "servgate":
+		suggestedRunbook = "rb-gate-restart"
+		runbookSteps = []string{
+			"1. Check route health metrics",
+			"2. Run: serv gate restart --graceful",
+			"3. Confirm service recovery logs",
+		}
+	case "servstore":
+		suggestedRunbook = "rb-store-heal"
+		runbookSteps = []string{
+			"1. Assess filesystem status",
+			"2. Run: serv store heal --shards=all",
+			"3. Re-verify replica consistency",
+		}
+	default:
+		suggestedRunbook = "rb-queue-purge"
+		runbookSteps = []string{
+			"1. Verify DLQ message count",
+			"2. Run: serv queue purge dlq",
+			"3. Auto-notify subscribers",
+		}
+	}
+
 	timeline := IncidentTimeline{
-		AlertID:   alertID,
-		Title:     fmt.Sprintf("Incident Analysis: %s", message),
-		Component: component,
-		Severity:  severity,
-		Events:    events,
+		AlertID:            alertID,
+		Title:              fmt.Sprintf("Incident Analysis: %s", message),
+		Component:          component,
+		Severity:           severity,
+		Events:             events,
+		AISuggestedRunbook: suggestedRunbook,
+		AIRunbookSteps:     runbookSteps,
 	}
 
 	json.NewEncoder(w).Encode(timeline)
