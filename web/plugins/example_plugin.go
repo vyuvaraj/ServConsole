@@ -1,7 +1,7 @@
-package main
+package plugins
 
 import "fmt"
 
-func main() {
+func Example() {
 	fmt.Println("Hello from ServConsole WASM plugin panel!")
 }
