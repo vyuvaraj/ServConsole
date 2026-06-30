@@ -40,6 +40,7 @@ var (
 	authUrl    = flag.String("auth-url", "http://localhost:8098", "ServAuth base URL")
 	dbUrl      = flag.String("db-url", "http://localhost:8097", "ServDB base URL")
 	mailUrl    = flag.String("mail-url", "http://localhost:8094", "ServMail base URL")
+	flowUrl    = flag.String("flow-url", "http://localhost:8096", "ServFlow base URL")
 	authToken  = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
 	gateConfig = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
 )
@@ -53,6 +54,10 @@ type ServDiscovery struct {
 	Queue        string `json:"queue"`         // ServQueue base URL
 	Trace        string `json:"trace"`         // ServTrace base URL
 	Tunnel       string `json:"tunnel"`        // ServTunnel base URL
+	Auth         string `json:"auth"`          // ServAuth base URL
+	DB           string `json:"db"`            // ServDB base URL
+	Mail         string `json:"mail"`          // ServMail base URL
+	Flow         string `json:"flow"`          // ServFlow base URL
 	ConsolePort  int    `json:"console_port"` // Override listen port
 	JWTSecret    string `json:"jwt_secret"`   // Shared JWT signing secret
 	OTLPEndpoint string `json:"otlp_endpoint"` // Shared OpenTelemetry collector
@@ -72,6 +77,10 @@ func loadDiscovery() ServDiscovery {
 		Queue:        *queueUrl,
 		Trace:        *traceUrl,
 		Tunnel:       *tunnelUrl,
+		Auth:         *authUrl,
+		DB:           *dbUrl,
+		Mail:         *mailUrl,
+		Flow:         *flowUrl,
 		ConsolePort:  *port,
 		AuthToken:    *authToken,
 		GateConfig:   *gateConfig,
@@ -114,6 +123,10 @@ func loadDiscovery() ServDiscovery {
 	if manifest.GateConfig != "" { d.GateConfig = manifest.GateConfig }
 	if manifest.Trace != "" { d.Trace = manifest.Trace }
 	if manifest.Tunnel != "" { d.Tunnel = manifest.Tunnel }
+	if manifest.Auth != "" { d.Auth = manifest.Auth }
+	if manifest.DB != "" { d.DB = manifest.DB }
+	if manifest.Mail != "" { d.Mail = manifest.Mail }
+	if manifest.Flow != "" { d.Flow = manifest.Flow }
 
 	return d
 }
