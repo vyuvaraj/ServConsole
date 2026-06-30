@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -2222,7 +2223,8 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	svcFilter := query.Get("service")
 	levelFilter := query.Get("level")
-	searchFilter := strings.ToLower(query.Get("search"))
+	rawSearch := query.Get("search")
+	searchFilter := strings.ToLower(rawSearch)
 
 	logBufferMu.Lock()
 	defer logBufferMu.Unlock()
@@ -2235,8 +2237,21 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		if levelFilter != "" && !strings.EqualFold(logEntry.Level, levelFilter) {
 			continue
 		}
-		if searchFilter != "" && !strings.Contains(strings.ToLower(logEntry.Message), searchFilter) {
-			continue
+		if searchFilter != "" {
+			matched := false
+			// Try to treat as a regex pattern
+			re, err := regexp.Compile(rawSearch)
+			if err == nil {
+				matched = re.MatchString(logEntry.Message) || re.MatchString(logEntry.Service) || re.MatchString(logEntry.Level)
+			} else {
+				// Fallback to substring matching
+				matched = strings.Contains(strings.ToLower(logEntry.Message), searchFilter) ||
+					strings.Contains(strings.ToLower(logEntry.Service), searchFilter) ||
+					strings.Contains(strings.ToLower(logEntry.Level), searchFilter)
+			}
+			if !matched {
+				continue
+			}
 		}
 		filtered = append(filtered, logEntry)
 	}

@@ -361,6 +361,18 @@ func TestHandleLogs(t *testing.T) {
 	if len(filteredEntries) != 0 {
 		t.Errorf("expected 0 entries with level=info, got: %d", len(filteredEntries))
 	}
+
+	// 4. Query Logs with regex filtering (DX.8)
+	getRegexReq := httptest.NewRequest("GET", "/api/logs?search=Some.*wrong", nil)
+	w4 := httptest.NewRecorder()
+	handleGetLogs(w4, getRegexReq)
+
+	var regexEntries []LogEntry
+	json.NewDecoder(w4.Body).Decode(&regexEntries)
+
+	if len(regexEntries) != 1 {
+		t.Errorf("expected 1 entry matching regex 'Some.*wrong', got: %d", len(regexEntries))
+	}
 }
 
 func TestHandleCostEstimation(t *testing.T) {
