@@ -120,3 +120,9 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 
 > See [UNIFIED_ROADMAP.md](../../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
+
+## Phase 11: Production Readiness (External Audit — Pending)
+- [ ] **ServConsole Package Decomposition** — Split 3,277-line main.go into pkg/proxy/, pkg/ws/, pkg/ai/, pkg/incidents/, each independently testable (ARCH.6)
+- [ ] **Plugin Panel Architecture** — Console panels as independently compiled WASM modules loaded at runtime; adding a panel doesn't require recompiling core (ARCH.7)
+- [ ] **Tenant Admin Console** — Tenant selector UI; switching tenants invalidates the current session scope and re-fetches tenant-scoped data (SEC.14)
+- [ ] **SLO Baseline Definitions** — Default SLOs (p99 latency, error rate) for each service surfaced in the SLO dashboard with pre-configured error budgets (OPS.8)
