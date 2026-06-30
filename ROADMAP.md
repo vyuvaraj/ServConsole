@@ -67,7 +67,7 @@ These items take ServConsole from a dashboard into a **full observability and op
 | 7.2 | **Incident timeline auto-generation** | Large | When an alert fires, automatically build a timeline: what changed (deploys, config), what metrics spiked, which traces errored. One-page incident summary. | [x] |
 | 7.3 | **Service topology auto-discovery** | Medium | Parse OTel trace spans to automatically build a service dependency graph. Show which services call which, latency between them, and error rates on edges. | [ ] |
 | 7.4 | **Log aggregation & search** | Large | Collect structured JSON logs from all services (via stdout scraping or push API). Full-text search, filter by service/level/trace_id, and live tail. | [x] |
-| 7.5 | **Custom dashboard builder** | Large | Drag-and-drop dashboard editor: pick metrics, choose visualization (line chart, bar, gauge, table), set time range. Save and share custom dashboards per team. | [ ] |
+| 7.5 | **Custom dashboard builder** | Large | Drag-and-drop dashboard editor: pick metrics, choose visualization (line chart, bar, gauge, table), set time range. Save and share custom dashboards per team. | [x] |
 | 7.6 | **Deployment tracking & rollback** | Medium | Track deployments (version, timestamp, who deployed). Overlay on metrics charts. One-click rollback to previous version via re-deploy trigger. | [x] |
 | 7.7 | **SLO/SLI tracking & error budgets** | Medium | Define SLOs (99.9% availability, P99 < 200ms). Track remaining error budget. Alert when budget is being consumed too fast. | [x] |
 | 7.8 | **Embedded terminal (service exec)** | Medium | SSH/exec into a running container from the console. View live logs, run diagnostics, inspect environment — without leaving the browser. | [x] |
@@ -109,10 +109,10 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 | 9.3 | **ServDB Connection Pool Dashboard** | Medium | Real-time pool utilization, active queries, slow query log, deadlock alerts. Per-service breakdown. | [x] |
 | 9.4 | **ServDB Migration Manager** | Medium | View pending migrations, run/rollback migrations, schema diff visualization. | [x] |
 | 9.5 | **ServMail Delivery Dashboard** | Medium | Send/bounce/complaint rates, delivery timeline, template preview editor. | [x] |
-| 9.6 | **ServMail Template Editor** | Medium | WYSIWYG email template editor with variable injection preview and version history. | [ ] |
-| 9.7 | **ServFlow Workflow Visualizer** | Large | Interactive DAG view of running workflows. Step status (pending/running/completed/failed). Click to inspect state. | [ ] |
-| 9.8 | **ServFlow Approval Queue** | Medium | Human approval gate UI — list pending approvals, approve/reject with comment, audit trail. | [ ] |
-| 9.9 | **ServFlow Execution History** | Medium | Searchable history of workflow executions with duration, outcome, and step-by-step replay. | [ ] |
+| 9.6 | **ServMail Template Editor** | Medium | WYSIWYG email template editor with variable injection preview and version history. | [x] |
+| 9.7 | **ServFlow Workflow Visualizer** | Large | Interactive DAG view of running workflows. Step status (pending/running/completed/failed). Click to inspect state. | [x] |
+| 9.8 | **ServFlow Approval Queue** | Medium | Human approval gate UI — list pending approvals, approve/reject with comment, audit trail. | [x] |
+| 9.9 | **ServFlow Execution History** | Medium | Searchable history of workflow executions with duration, outcome, and step-by-step replay. | [x] |
 
 > See [UNIFIED_ROADMAP.md](../../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
