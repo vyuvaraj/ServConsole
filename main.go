@@ -296,6 +296,7 @@ func main() {
 	mux.HandleFunc("/api/deployments/rollback", authorizeConsole(handleRollback))
 	mux.HandleFunc("/api/environments", authorizeConsole(handleEnvironments))
 	mux.HandleFunc("/api/environments/select", authorizeConsole(handleSelectEnvironment))
+	mux.HandleFunc("/api/tenant/switch", authorizeConsole(handleTenantSwitch))
 	mux.HandleFunc("/api/incidents/analyze", authorizeConsole(handleIncidentAnalyze))
 	mux.HandleFunc("/api/runbooks", authorizeConsole(handleRunbooks))
 	mux.HandleFunc("/api/runbooks/execute", authorizeConsole(handleExecuteRunbook))
@@ -3715,6 +3716,51 @@ func handlePlaygroundCompile(w http.ResponseWriter, r *http.Request) {
 		"status":      status,
 		"diagnostics": diagnostics,
 		"preview":     "AST compilation complete: 0 errors detected.",
+	})
+}
+
+func handleTenantSwitch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TenantID string `json:"tenantId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteJSONError(w, r, "Invalid JSON body", "ERR_INVALID_BODY", http.StatusBadRequest)
+		return
+	}
+
+	if req.TenantID == "" {
+		WriteJSONError(w, r, "tenantId is required", "ERR_TENANT_ID_REQUIRED", http.StatusBadRequest)
+		return
+	}
+
+	username := r.Header.Get("X-Console-User")
+	role := r.Header.Get("X-Console-Role")
+	if username == "" {
+		WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
+		return
+	}
+
+	header := base64UrlEncode([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	payload := base64UrlEncode([]byte(fmt.Sprintf(`{"username":%q,"exp":%d,"role":%q,"tenant_id":%q}`, username, time.Now().Add(24*time.Hour).Unix(), role, req.TenantID)))
+	
+	secret := jwtSecBytes
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(header + "." + payload))
+	signature := base64UrlEncode(mac.Sum(nil))
+	newToken := header + "." + payload + "." + signature
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":      "success",
+		"message":     "Tenant scope switched and token rotated successfully",
+		"token":       newToken,
+		"newTenantId": req.TenantID,
 	})
 }
 
