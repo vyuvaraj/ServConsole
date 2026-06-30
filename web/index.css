@@ -121,6 +121,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-shrink: 0;
 }
 
 .logo-icon {
@@ -153,6 +154,13 @@ body {
 .nav-tabs {
   display: flex;
   gap: 0.5rem;
+  overflow-x: auto;
+  flex-grow: 1;
+  margin: 0 1.5rem;
+  scrollbar-width: none; /* Firefox */
+}
+.nav-tabs::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
 }
 
 .tab-btn {
@@ -169,6 +177,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
 }
 
 .tab-btn .icon {
