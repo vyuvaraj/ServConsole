@@ -114,5 +114,9 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 | 9.8 | **ServFlow Approval Queue** | Medium | Human approval gate UI — list pending approvals, approve/reject with comment, audit trail. | [x] |
 | 9.9 | **ServFlow Execution History** | Medium | Searchable history of workflow executions with duration, outcome, and step-by-step replay. | [x] |
 
+## Phase 10: DevOps & Developer Experience (Pending)
+- [ ] **Web Log Tail Filtering** — Regex and service level filtering in console log streams (DX.8)
+- [ ] **GitOps Config Sync** — Git repository webhooks to automatically re-sync gateway routes (OPS.5)
+
 > See [UNIFIED_ROADMAP.md](../../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
